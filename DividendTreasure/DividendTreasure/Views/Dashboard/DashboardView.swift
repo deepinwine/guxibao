@@ -11,53 +11,29 @@ import SwiftData
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var portfolios: [Portfolio]
+    @AppStorage("annualPassiveIncomeGoal") private var annualPassiveIncomeGoal: Double = 50000
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // 总览卡片
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("总览")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
+                    // 被动收入目标卡片
+                    PassiveIncomeCard(
+                        targetAmount: annualPassiveIncomeGoal,
+                        currentAmount: totalAnnualDividend
+                    )
 
-                        HStack(spacing: 16) {
-                            MetricCard(
-                                title: "总市值",
-                                value: CurrencyFormatter.formatCompact(totalMarketValue),
-                                icon: "dollarsign.circle.fill",
-                                color: .blue
-                            )
+                    // 资产透视卡片
+                    AssetOverviewCard(
+                        totalMarketValue: totalMarketValue,
+                        totalAnnualDividend: totalAnnualDividend,
+                        portfolioYield: portfolioYield,
+                        holdingsCount: totalHoldingsCount,
+                        portfoliosCount: portfolios.count
+                    )
 
-                            MetricCard(
-                                title: "预计股息",
-                                value: CurrencyFormatter.formatCompact(totalAnnualDividend),
-                                icon: "arrow.down.circle.fill",
-                                color: .green
-                            )
-                        }
-
-                        HStack(spacing: 16) {
-                            MetricCard(
-                                title: "组合股息率",
-                                value: PercentFormatter.format(portfolioYield),
-                                icon: "percent",
-                                color: .orange
-                            )
-
-                            MetricCard(
-                                title: "持仓数量",
-                                value: "\(totalHoldingsCount)",
-                                icon: "number",
-                                color: .purple
-                            )
-                        }
-                    }
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                    // 快速操作
+                    QuickActionsSection()
 
                     Spacer()
                 }
@@ -65,55 +41,106 @@ struct DashboardView: View {
             }
             .navigationTitle("股息宝")
             .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink(destination: SettingsView()) {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
         }
     }
 
     // MARK: - 计算属性
 
     private var totalMarketValue: Double {
-        portfolios.reduce(0) { $0 + $1.holdings.reduce(0) { $0 + $1.marketValue } }
+        portfolios.reduce(0) { $0 + CalculationService.portfolioMarketValue(holdings: $1.holdings) }
     }
 
     private var totalAnnualDividend: Double {
-        portfolios.reduce(0) { $0 + $1.holdings.reduce(0) { $0 + $1.annualDividend } }
+        portfolios.reduce(0) { $0 + CalculationService.portfolioAnnualDividend(holdings: $1.holdings) }
     }
 
     private var portfolioYield: Double {
-        guard totalMarketValue > 0 else { return 0 }
-        return totalAnnualDividend / totalMarketValue
+        CalculationService.portfolioDividendYield(holdings: allHoldings)
     }
 
     private var totalHoldingsCount: Int {
         portfolios.reduce(0) { $0 + $1.holdings.count }
     }
+
+    private var allHoldings: [Holding] {
+        portfolios.flatMap { $0.holdings }
+    }
 }
 
-// MARK: - 指标卡片组件
+// MARK: - 快速操作区域
 
-struct MetricCard: View {
+struct QuickActionsSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("快速操作", systemImage: "bolt.fill")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                QuickActionButton(
+                    title: "添加持仓",
+                    icon: "plus.circle.fill",
+                    color: .blue
+                ) {
+                    // TODO: 阶段 5 实现 OCR 导入
+                }
+
+                QuickActionButton(
+                    title: "查看排行",
+                    icon: "chart.bar.fill",
+                    color: .orange
+                ) {
+                    // TODO: 阶段 6 实现排行榜
+                }
+
+                QuickActionButton(
+                    title: "设置目标",
+                    icon: "target",
+                    color: .green
+                ) {
+                    // 跳转到设置页
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+    }
+}
+
+// MARK: - 快速操作按钮
+
+struct QuickActionButton: View {
     let title: String
-    let value: String
     let icon: String
     let color: Color
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        Button(action: action) {
+            VStack(spacing: 8) {
                 Image(systemName: icon)
+                    .font(.title2)
                     .foregroundStyle(color)
+
                 Text(title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
             }
-
-            Text(value)
-                .font(.title2)
-                .fontWeight(.bold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(8)
+        .buttonStyle(.plain)
     }
 }
 
