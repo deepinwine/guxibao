@@ -52,6 +52,57 @@ final class TradeRecord {
 }
 ```
 
+### 1.3 StrategyTemplate（策略模板，非持久化）
+
+策略模板作为枚举和计算工具，不需要持久化存储：
+
+```swift
+enum StrategyTemplate: String, CaseIterable, Identifiable {
+    case dividendYieldGrid = "股息率网格"
+    case costPriceLevel = "成本价档位"
+    case dynamicRebalance = "动态再平衡"
+    case custom = "自定义"
+    
+    var id: String { rawValue }
+    
+    var description: String {
+        switch self {
+        case .dividendYieldGrid:
+            return "高股息率买入，低股息率卖出"
+        case .costPriceLevel:
+            return "基于成本价设置上下档位"
+        case .dynamicRebalance:
+            return "维持目标股息率区间"
+        case .custom:
+            return "完全自定义档位参数"
+        }
+    }
+    
+    // 根据模板参数生成档位列表
+    func generateLevels(
+        holding: Holding,
+        parameters: StrategyParameters
+    ) -> [GridTradingLevelParams] {
+        // 各模板的生成逻辑
+    }
+}
+
+struct StrategyParameters {
+    // 股息率网格参数
+    var targetBuyYield: Double = 0.06    // 目标买入股息率
+    var targetSellYield: Double = 0.04   // 目标卖出股息率
+    var yieldStep: Double = 0.005        // 股息率间距
+    
+    // 成本价档位参数
+    var costPrice: Double = 0
+    var percentStep: Double = 0.05       // 价格百分比间距
+    var levelCount: Int = 3              // 档位数量
+    
+    // 动态再平衡参数
+    var targetYieldRange: ClosedRange<Double> = 0.04...0.06
+}
+```
+
 ---
 
 ## 2. 用户界面
@@ -68,6 +119,7 @@ final class TradeRecord {
 
 操作按钮：
 - [快速生成档位] - 根据参数自动生成档位表
+- [策略模板] - 选择预设模板（会员专属）
 - [手动添加档位] - 手动输入单个档位
 
 档位列表：
@@ -76,9 +128,49 @@ final class TradeRecord {
 
 底部按钮：
 - [交易记录] - 查看历史交易记录
-- [上传截图识别] - OCR识别交易信息
+- [上传截图识别] - OCR识别交易信息（会员专属）
 
-### 2.3 快速生成档位弹窗 (QuickGenerateView)
+### 2.3 策略模板选择（会员专属）
+
+用户点击"策略模板"按钮后，显示模板列表：
+
+```
+┌─────────────────────────────────┐
+│ 选择策略模板                     │
+├─────────────────────────────────┤
+│ ○ 股息率网格（推荐）             │
+│   高股息率买入，低股息率卖出     │
+│                                 │
+│ ○ 成本价档位                     │
+│   基于成本价设置上下档位         │
+│                                 │
+│ ○ 动态再平衡                     │
+│   维持目标股息率区间             │
+│                                 │
+│ ○ 自定义                         │
+│   完全自定义档位参数             │
+└─────────────────────────────────┘
+```
+
+**模板1：股息率网格**
+- 参数：目标买入股息率、目标卖出股息率、档位间距
+- 自动生成：按股息率间距生成买卖档位
+- 适用场景：股息率波动较大的股票
+
+**模板2：成本价档位**
+- 参数：成本价、上下浮动百分比、档位数量
+- 自动生成：基于成本价的买卖档位
+- 适用场景：做成本摊薄
+
+**模板3：动态再平衡**
+- 参数：目标股息率区间（如4%-6%）
+- 自动生成：区间上沿卖出、下沿买入
+- 适用场景：维持稳定股息率
+
+**免责声明：**
+> "策略模板仅为工具框架，帮助您设置价格档位。所有投资决策由您自主判断，不构成投资建议。"
+
+### 2.4 快速生成档位弹窗 (QuickGenerateView)
 
 输入参数：
 - 当前价格（默认从持仓获取）
@@ -176,6 +268,7 @@ DividendTreasure/
 │   └── GridTrading/
 │       ├── GridTradingView.swift       # 网格交易主页面
 │       ├── GridLevelListView.swift     # 档位列表组件
+│       ├── StrategyTemplateView.swift  # 策略模板选择页（会员）
 │       ├── QuickGenerateView.swift     # 快速生成档位弹窗
 │       ├── GridLevelFormView.swift     # 手动添加档位表单
 │       ├── TradeRecordView.swift       # 交易记录页面
@@ -197,15 +290,21 @@ DividendTreasure/
 
 ### 5.1 订阅功能关联
 
-网格交易助手作为会员功能：
-- 免费版：最多设置3个档位，不支持截图识别
-- 会员版：无限档位，支持截图识别
+网格交易助手权限分配：
+| 功能 | 免费版 | 会员版 |
+|------|--------|--------|
+| 档位数量 | 最多3个 | 无限 |
+| 截图识别 | 不支持 | 支持 |
+| 策略模板 | 不支持 | 支持4种模板 |
+| 交易记录 | 最多10条 | 无限 |
 
 ### 5.2 权限检查点
 
 - 快速生成档位：检查档位数量限制
 - 手动添加档位：检查档位数量限制
-- 截图识别：检查截图识别权限
+- 截图识别：检查截图识别权限（会员）
+- 策略模板：检查策略模板权限（会员）
+- 交易记录：检查交易记录数量限制
 
 ---
 
@@ -214,9 +313,11 @@ DividendTreasure/
 1. 用户能为任意持仓设置价格档位
 2. 每个档位自动显示对应的股息率
 3. 支持手动输入和快速生成两种方式
-4. 截图识别能提取交易信息并创建记录
+4. 截图识别能提取交易信息并创建记录（会员）
 5. 交易记录自动更新持仓成本和数量
 6. 档位执行后能标记状态并创建交易记录
+7. 会员用户可选择策略模板生成档位
+8. 免费用户看到策略模板入口但提示升级
 
 ---
 
@@ -226,14 +327,16 @@ DividendTreasure/
 
 - 网格档位设置和股息率计算
 - 手动添加交易记录
-- 截图识别交易信息
+- 截图识别交易信息（会员）
 - 交易记录自动更新持仓
+- 策略模板选择（会员专属）
+- 快速生成档位功能
 
 ### 7.2 不在本次范围
 
 - 实时价格推送（未来可扩展）
 - 自动交易执行（不接入券商API）
-- 交易策略建议（仅展示数据）
+- 个性化策略推荐（保持合规边界）
 
 ---
 
