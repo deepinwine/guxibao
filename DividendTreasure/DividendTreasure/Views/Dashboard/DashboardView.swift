@@ -89,6 +89,7 @@ struct QuickActionsSection: View {
     @Binding var showAddPortfolio: Bool
     @Binding var navigateToRanking: Bool
 
+    @State private var showImportAsset = false
     @State private var showComingSoon = false
     @State private var comingSoonFeature = ""
 
@@ -99,12 +100,21 @@ struct QuickActionsSection: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                // 添加持仓
+                // 导入资产（OCR）
+                Button(action: { showImportAsset = true }) {
+                    ActionButton(
+                        title: "导入资产",
+                        icon: "camera.fill",
+                        color: .blue
+                    )
+                }
+
+                // 添加持仓（手动）
                 Button(action: { showAddPortfolio = true }) {
                     ActionButton(
                         title: "添加持仓",
                         icon: "plus.circle.fill",
-                        color: .blue
+                        color: .green
                     )
                 }
 
@@ -119,15 +129,6 @@ struct QuickActionsSection: View {
                         color: .orange
                     )
                 }
-
-                // 设置目标（跳转设置页）
-                NavigationLink(destination: SettingsView()) {
-                    ActionButton(
-                        title: "设置目标",
-                        icon: "target",
-                        color: .green
-                    )
-                }
             }
         }
         .padding()
@@ -138,6 +139,9 @@ struct QuickActionsSection: View {
             Button("知道了", role: .cancel) { }
         } message: {
             Text("\(comingSoonFeature)功能将在后续版本推出")
+        }
+        .sheet(isPresented: $showImportAsset) {
+            ImportAssetView()
         }
     }
 }
