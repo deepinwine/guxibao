@@ -166,6 +166,12 @@ struct PortfolioDetailView: View {
                         NavigationLink(destination: HoldingFormView(portfolio: portfolio, holding: holding)) {
                             HoldingRow(holding: holding)
                         }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            NavigationLink(destination: GridTradingView(holding: holding)) {
+                                Label("网格交易", systemImage: "chart.xyaxis.line")
+                            }
+                            .tint(.blue)
+                        }
                     }
                     .onDelete(perform: deleteHoldings)
                 }

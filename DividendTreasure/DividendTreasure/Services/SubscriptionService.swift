@@ -63,6 +63,10 @@ struct FeaturePermissions {
     let tradingExportImport: Bool
     let aiInsights: Bool
     let calendarView: Bool
+    let gridTradingLevels: Int           // 档位数量限制
+    let tradeRecords: Int                // 交易记录数量限制
+    let strategyTemplates: Bool          // 策略模板权限
+    let ocrRecognition: Bool             // 截图识别权限
 
     static func forTier(_ tier: SubscriptionTier) -> FeaturePermissions {
         switch tier {
@@ -75,7 +79,11 @@ struct FeaturePermissions {
                 unlimitedHoldings: false,
                 tradingExportImport: false,
                 aiInsights: false,
-                calendarView: false
+                calendarView: false,
+                gridTradingLevels: 3,
+                tradeRecords: 10,
+                strategyTemplates: false,
+                ocrRecognition: false
             )
         case .monthly, .quarterly, .yearly:
             return FeaturePermissions(
@@ -86,7 +94,11 @@ struct FeaturePermissions {
                 unlimitedHoldings: true,
                 tradingExportImport: true,
                 aiInsights: true,
-                calendarView: true
+                calendarView: true,
+                gridTradingLevels: .max,
+                tradeRecords: .max,
+                strategyTemplates: true,
+                ocrRecognition: true
             )
         }
     }
@@ -196,6 +208,26 @@ class SubscriptionService: ObservableObject {
     func canAddHolding(currentCount: Int) -> Bool {
         if permissions.unlimitedHoldings { return true }
         return currentCount < permissions.maxHoldingsPerPortfolio
+    }
+
+    // MARK: - 网格交易权限检查
+
+    func canAddGridLevel(currentCount: Int) -> Bool {
+        if permissions.gridTradingLevels == .max { return true }
+        return currentCount < permissions.gridTradingLevels
+    }
+
+    func canAddTradeRecord(currentCount: Int) -> Bool {
+        if permissions.tradeRecords == .max { return true }
+        return currentCount < permissions.tradeRecords
+    }
+
+    func canUseStrategyTemplates() -> Bool {
+        permissions.strategyTemplates
+    }
+
+    func canUseOCRRecognition() -> Bool {
+        permissions.ocrRecognition
     }
 
     // MARK: - 产品信息
