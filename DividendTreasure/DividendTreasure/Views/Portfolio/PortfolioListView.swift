@@ -96,36 +96,144 @@ struct PortfolioRow: View {
     }
 }
 
-// MARK: - 组合详情视图（占位）
+// MARK: - 组合详情视图
 
 struct PortfolioDetailView: View {
     let portfolio: Portfolio
+    @State private var showingAddHolding = false
 
     var body: some View {
         List {
+            // 组合统计信息
+            Section("组合概览") {
+                HStack {
+                    Text("总市值")
+                    Spacer()
+                    Text(CurrencyFormatter.formatCompact(marketValue))
+                        .fontWeight(.semibold)
+                }
+
+                HStack {
+                    Text("年度股息")
+                    Spacer()
+                    Text(CurrencyFormatter.formatCompact(annualDividend))
+                        .foregroundStyle(.green)
+                }
+
+                HStack {
+                    Text("组合股息率")
+                    Spacer()
+                    Text(PercentFormatter.format(dividendYield))
+                        .foregroundStyle(.orange)
+                }
+
+                HStack {
+                    Text("持仓数量")
+                    Spacer()
+                    Text("\(portfolio.holdings.count)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // 持仓列表
             Section("持仓列表") {
-                ForEach(portfolio.holdings) { holding in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(holding.symbol)
-                                .font(.headline)
-                            Text(holding.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing) {
-                            Text(CurrencyFormatter.format(holding.marketValue))
-                            Text("\(PercentFormatter.format(holding.dividendYield))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                if portfolio.holdings.isEmpty {
+                    ContentUnavailableView(
+                        "暂无持仓",
+                        systemImage: "chart.bar",
+                        description: Text("点击右上角 + 添加持仓")
+                    )
+                } else {
+                    ForEach(portfolio.holdings) { holding in
+                        NavigationLink(destination: HoldingFormView(portfolio: portfolio, holding: holding)) {
+                            HoldingRow(holding: holding)
                         }
                     }
+                    .onDelete(perform: deleteHoldings)
                 }
             }
         }
         .navigationTitle(portfolio.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { showingAddHolding = true }) {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddHolding) {
+            HoldingFormView(portfolio: portfolio)
+        }
+    }
+
+    private var marketValue: Double {
+        CalculationService.portfolioMarketValue(holdings: portfolio.holdings)
+    }
+
+    private var annualDividend: Double {
+        CalculationService.portfolioAnnualDividend(holdings: portfolio.holdings)
+    }
+
+    private var dividendYield: Double {
+        CalculationService.portfolioDividendYield(holdings: portfolio.holdings)
+    }
+
+    private func deleteHoldings(offsets: IndexSet) {
+        withAnimation {
+            for index in offsets {
+                portfolio.holdings[index].portfolio = nil
+            }
+        }
+    }
+}
+
+// MARK: - 仓行视图
+
+struct HoldingRow: View {
+    let holding: Holding
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(holding.symbol)
+                        .font(.headline)
+                    Text(holding.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(CurrencyFormatter.formatCompact(holding.marketValue))
+                        .fontWeight(.semibold)
+                    HStack(spacing: 8) {
+                        Text(PercentFormatter.format(holding.dividendYield))
+                            .foregroundStyle(.orange)
+                        if holding.profitLoss >= 0 {
+                            Text(PercentFormatter.formatWithSign(holding.profitLossPercent))
+                                .foregroundStyle(.green)
+                        } else {
+                            Text(PercentFormatter.formatWithSign(holding.profitLossPercent))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+
+            // 详情行
+            HStack(spacing: 16) {
+                Label("数量: \(holding.quantity, specifier: "%.0f")", systemImage: "number")
+                Label("成本: \(CurrencyFormatter.formatPrice(holding.averageCost))", systemImage: "dollarsign")
+                Label("现价: \(CurrencyFormatter.formatPrice(holding.currentPrice))", systemImage: "chart.line.uptrend.xyaxis")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 }
 
