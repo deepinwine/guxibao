@@ -121,10 +121,10 @@ struct HoldingFormView: View {
 
                 // 股息信息
                 Section("股息信息") {
-                    TextField("年度每股股息", text: $annualDividendPerShare)
+                    TextField("年度每股股息（元）", text: $annualDividendPerShare)
                         .keyboardType(.decimalPad)
 
-                    TextField("预计派息月份（例如：6,7）", text: $expectedDividendMonths)
+                    TextField("预计派息月份，如 6,7", text: $expectedDividendMonths)
                 }
 
                 // 计算预览（仅当数据完整时显示）
