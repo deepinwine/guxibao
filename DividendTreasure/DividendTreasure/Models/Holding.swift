@@ -58,10 +58,6 @@ final class Holding {
 
     var portfolio: Portfolio?
 
-    // 反向关系：股息记录（CloudKit 要求双向关系）
-    @Relationship(deleteRule: .nullify, inverse: \DividendRecord.holding)
-    var dividendRecords: [DividendRecord] = []
-
     // 计算属性：市值
     var marketValue: Double {
         quantity * currentPrice
