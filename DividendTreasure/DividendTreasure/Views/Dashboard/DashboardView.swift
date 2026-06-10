@@ -13,10 +13,13 @@ struct DashboardView: View {
     @Query private var portfolios: [Portfolio]
     @AppStorage("annualPassiveIncomeGoal") private var annualPassiveIncomeGoal: Double = 50000
 
+    @State private var showAddPortfolio = false
+    @State private var navigateToRanking = false
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 16) {
                     // 被动收入目标卡片
                     PassiveIncomeCard(
                         targetAmount: annualPassiveIncomeGoal,
@@ -28,16 +31,18 @@ struct DashboardView: View {
                         totalMarketValue: totalMarketValue,
                         totalAnnualDividend: totalAnnualDividend,
                         portfolioYield: portfolioYield,
-                        holdingsCount: totalHoldingsCount,
+                        topHoldings: topHoldings,
                         portfoliosCount: portfolios.count
                     )
 
                     // 快速操作
-                    QuickActionsSection()
-
-                    Spacer()
+                    QuickActionsSection(
+                        showAddPortfolio: $showAddPortfolio,
+                        navigateToRanking: $navigateToRanking
+                    )
                 }
                 .padding()
+                .padding(.bottom, 20)
             }
             .navigationTitle("股息宝")
             .background(Color(.systemGroupedBackground))
@@ -47,6 +52,9 @@ struct DashboardView: View {
                         Image(systemName: "gearshape")
                     }
                 }
+            }
+            .sheet(isPresented: $showAddPortfolio) {
+                AddPortfolioView()
             }
         }
     }
@@ -65,18 +73,25 @@ struct DashboardView: View {
         CalculationService.portfolioDividendYield(holdings: allHoldings)
     }
 
-    private var totalHoldingsCount: Int {
-        portfolios.reduce(0) { $0 + $1.holdings.count }
-    }
-
     private var allHoldings: [Holding] {
         portfolios.flatMap { $0.holdings }
+    }
+
+    private var topHoldings: [(symbol: String, name: String, yield: Double)] {
+        let sorted = CalculationService.holdingsByYield(holdings: allHoldings)
+        return sorted.prefix(3).map { ($0.symbol, $0.name, $0.dividendYield) }
     }
 }
 
 // MARK: - 快速操作区域
 
 struct QuickActionsSection: View {
+    @Binding var showAddPortfolio: Bool
+    @Binding var navigateToRanking: Bool
+
+    @State private var showComingSoon = false
+    @State private var comingSoonFeature = ""
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("快速操作", systemImage: "bolt.fill")
@@ -84,28 +99,34 @@ struct QuickActionsSection: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                QuickActionButton(
-                    title: "添加持仓",
-                    icon: "plus.circle.fill",
-                    color: .blue
-                ) {
-                    // TODO: 阶段 5 实现 OCR 导入
+                // 添加持仓
+                Button(action: { showAddPortfolio = true }) {
+                    ActionButton(
+                        title: "添加持仓",
+                        icon: "plus.circle.fill",
+                        color: .blue
+                    )
                 }
 
-                QuickActionButton(
-                    title: "查看排行",
-                    icon: "chart.bar.fill",
-                    color: .orange
-                ) {
-                    // TODO: 阶段 6 实现排行榜
+                // 查看排行（暂时提示）
+                Button(action: {
+                    comingSoonFeature = "排行榜"
+                    showComingSoon = true
+                }) {
+                    ActionButton(
+                        title: "查看排行",
+                        icon: "chart.bar.fill",
+                        color: .orange
+                    )
                 }
 
-                QuickActionButton(
-                    title: "设置目标",
-                    icon: "target",
-                    color: .green
-                ) {
-                    // 跳转到设置页
+                // 设置目标（跳转设置页）
+                NavigationLink(destination: SettingsView()) {
+                    ActionButton(
+                        title: "设置目标",
+                        icon: "target",
+                        color: .green
+                    )
                 }
             }
         }
@@ -113,34 +134,35 @@ struct QuickActionsSection: View {
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+        .alert("即将推出", isPresented: $showComingSoon) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("\(comingSoonFeature)功能将在后续版本推出")
+        }
     }
 }
 
-// MARK: - 快速操作按钮
+// MARK: - 操作按钮
 
-struct QuickActionButton: View {
+struct ActionButton: View {
     let title: String
     let icon: String
     let color: Color
-    let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(color)
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(color)
 
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(8)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.primary)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(8)
     }
 }
 

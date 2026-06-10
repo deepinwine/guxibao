@@ -11,7 +11,7 @@ struct AssetOverviewCard: View {
     let totalMarketValue: Double
     let totalAnnualDividend: Double
     let portfolioYield: Double
-    let holdingsCount: Int
+    let topHoldings: [(symbol: String, name: String, yield: Double)]
     let portfoliosCount: Int
 
     var body: some View {
@@ -22,48 +22,99 @@ struct AssetOverviewCard: View {
                 .foregroundStyle(.secondary)
 
             // 主要指标网格
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 16) {
+            HStack(spacing: 12) {
                 // 总市值
-                MetricItem(
-                    title: "总市值",
-                    value: CurrencyFormatter.formatCompact(totalMarketValue),
-                    icon: "dollarsign.circle.fill",
-                    color: .blue
-                )
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "dollarsign.circle.fill")
+                            .foregroundStyle(.blue)
+                        Text("总市值")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(CurrencyFormatter.formatCompact(totalMarketValue))
+                        .font(.title)
+                        .fontWeight(.bold)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(8)
 
                 // 年度股息
-                MetricItem(
-                    title: "年度股息",
-                    value: CurrencyFormatter.formatCompact(totalAnnualDividend),
-                    icon: "arrow.down.circle.fill",
-                    color: .green
-                )
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("年度股息")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(CurrencyFormatter.formatCompact(totalAnnualDividend))
+                        .font(.title)
+                        .fontWeight(.bold)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(8)
+            }
 
-                // 组合股息率
-                MetricItem(
-                    title: "组合股息率",
-                    value: PercentFormatter.format(portfolioYield),
-                    icon: "percent",
-                    color: .orange
-                )
+            // 组合股息率
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "percent")
+                        .foregroundStyle(.orange)
+                    Text("组合股息率")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(PercentFormatter.format(portfolioYield))
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.orange)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(8)
 
-                // 持仓数量
-                MetricItem(
-                    title: "持仓数量",
-                    value: "\(holdingsCount)",
-                    icon: "number",
-                    color: .purple
-                )
+            // 股息率Top3
+            if !topHoldings.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "flame.fill")
+                            .foregroundStyle(.red)
+                        Text("股息率 Top 3")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(topHoldings, id: \.symbol) { holding in
+                        HStack {
+                            Text(holding.symbol)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text(holding.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(PercentFormatter.format(holding.yield))
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(8)
             }
 
             // 组合数量
             HStack {
                 Image(systemName: "briefcase.fill")
                     .foregroundStyle(.secondary)
-                Text("共 \(portfoliosCount) 个组合")
+                Text("共 \(portfoliosCount) 个投资组合")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -76,42 +127,16 @@ struct AssetOverviewCard: View {
     }
 }
 
-// MARK: - 指标项组件
-
-struct MetricItem: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.body)
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(value)
-                .font(.title2)
-                .fontWeight(.bold)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(8)
-    }
-}
-
 #Preview {
     AssetOverviewCard(
         totalMarketValue: 125800,
         totalAnnualDividend: 6500,
         portfolioYield: 0.0517,
-        holdingsCount: 5,
+        topHoldings: [
+            ("VZ", "Verizon", 0.063),
+            ("00941", "中国移动", 0.060),
+            ("601398", "工商银行", 0.056)
+        ],
         portfoliosCount: 2
     )
     .padding()
