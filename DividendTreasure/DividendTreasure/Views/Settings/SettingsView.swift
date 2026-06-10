@@ -11,10 +11,38 @@ import SwiftData
 struct SettingsView: View {
     @AppStorage("annualPassiveIncomeGoal") private var annualPassiveIncomeGoal: Double = 50000
     @AppStorage("defaultCurrency") private var defaultCurrency: String = "CNY"
+    @StateObject private var subscriptionService = SubscriptionService.shared
 
     var body: some View {
         NavigationStack {
             List {
+                // 订阅状态
+                Section {
+                    NavigationLink(destination: SubscriptionView()) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(subscriptionService.currentTier.rawValue)
+                                    .font(.headline)
+                                if subscriptionService.status.isActive {
+                                    Text("会员功能已解锁")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Text("升级解锁更多功能")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("会员订阅")
+                }
+
                 Section("年度目标") {
                     HStack {
                         Text("被动收入目标")

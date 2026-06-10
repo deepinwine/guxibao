@@ -12,6 +12,7 @@ struct PortfolioListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Portfolio.createdAt, order: .reverse) private var portfolios: [Portfolio]
     @State private var showingAddPortfolio = false
+    @State private var showingUpgradePrompt = false
 
     var body: some View {
         NavigationStack {
@@ -36,7 +37,7 @@ struct PortfolioListView: View {
             .navigationTitle("投资组合")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: { showingAddPortfolio = true }) {
+                    Button(action: { addPortfolio() }) {
                         Image(systemName: "plus")
                     }
                 }
@@ -44,7 +45,24 @@ struct PortfolioListView: View {
             .sheet(isPresented: $showingAddPortfolio) {
                 AddPortfolioView()
             }
+            .alert("升级到会员版", isPresented: $showingUpgradePrompt) {
+                Button("取消", role: .cancel) { }
+                Button("查看订阅") {
+                    // 跳转到订阅页面
+                }
+            } message: {
+                Text("免费版最多只能创建1个投资组合。升级到会员版解锁无限组合。")
+            }
         }
+    }
+
+    private func addPortfolio() {
+        // 检查免费版限制
+        if !SubscriptionService.shared.canAddPortfolio(currentCount: portfolios.count) {
+            showingUpgradePrompt = true
+            return
+        }
+        showingAddPortfolio = true
     }
 
     private func deletePortfolios(offsets: IndexSet) {

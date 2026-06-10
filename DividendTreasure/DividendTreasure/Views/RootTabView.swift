@@ -26,6 +26,11 @@ struct RootTabView: View {
                     Label("现金流", systemImage: "chart.line.uptrend.xyaxis")
                 }
 
+            CalendarView()
+                .tabItem {
+                    Label("日历", systemImage: "calendar")
+                }
+
             WatchlistView()
                 .tabItem {
                     Label("收藏", systemImage: "star.fill")
