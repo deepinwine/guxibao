@@ -15,11 +15,23 @@ struct AssetOverviewCard: View {
     let portfoliosCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // 标题
-            Label("资产透视", systemImage: "eye.fill")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+        NavigationLink(destination: AssetInsightView()) {
+            VStack(alignment: .leading, spacing: 16) {
+                // 标题
+                HStack {
+                    Label("资产透视", systemImage: "eye.fill")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text("查看详情")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                }
 
             // 主要指标网格
             HStack(spacing: 12) {
@@ -124,6 +136,8 @@ struct AssetOverviewCard: View {
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
     }
 }
 
