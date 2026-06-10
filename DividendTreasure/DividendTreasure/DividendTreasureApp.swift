@@ -21,6 +21,7 @@ struct DividendTreasureApp: App {
             WatchlistItem.self,
             ImportBatch.self,
             ImportCandidate.self,
+            StockData.self,
         ])
 
         // 配置 SwiftData（暂时仅使用本地存储）

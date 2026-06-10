@@ -32,6 +32,10 @@ struct HoldingFormView: View {
     @State private var showError = false
     @State private var errorMessage = ""
 
+    // 股票搜索
+    @State private var showStockSearch = false
+    @State private var isFetchingData = false
+
     init(portfolio: Portfolio, holding: Holding? = nil) {
         self.portfolio = portfolio
         self.holding = holding
@@ -56,6 +60,28 @@ struct HoldingFormView: View {
             Form {
                 // 基本信息
                 Section("基本信息") {
+                    // 股票搜索按钮
+                    Button(action: { showStockSearch = true }) {
+                        HStack {
+                            Label("搜索股票", systemImage: "magnifyingglass")
+                                .foregroundStyle(.blue)
+                            Spacer()
+                            if isFetchingData {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    // 或手动输入
+                    Text("或手动输入：")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+
                     TextField("股票代码", text: $symbol)
                         .textContentType(.name)
 
@@ -162,6 +188,24 @@ struct HoldingFormView: View {
                 Button("确定", role: .cancel) { }
             } message: {
                 Text(errorMessage)
+            }
+            .sheet(isPresented: $showStockSearch) {
+                StockSearchView { result, stockData in
+                    // 自动填充股票信息
+                    symbol = result.symbol
+                    name = result.name
+                    market = result.market
+
+                    // 如果有股息数据，自动填充
+                    if let data = stockData {
+                        if data.currentPrice > 0 {
+                            currentPrice = String(format: "%.2f", data.currentPrice)
+                        }
+                        if data.latestDividend > 0 {
+                            annualDividendPerShare = String(format: "%.4f", data.latestDividend)
+                        }
+                    }
+                }
             }
         }
     }
