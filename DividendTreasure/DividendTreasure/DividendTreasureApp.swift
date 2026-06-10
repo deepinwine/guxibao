@@ -22,6 +22,8 @@ struct DividendTreasureApp: App {
             ImportBatch.self,
             ImportCandidate.self,
             StockData.self,
+            GridTradingLevel.self,
+            TradeRecord.self,
         ])
 
         // 配置 SwiftData（暂时仅使用本地存储）
