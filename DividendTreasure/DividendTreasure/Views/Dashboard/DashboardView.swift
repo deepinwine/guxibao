@@ -20,8 +20,8 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
-                    // 被动收入目标卡片
-                    PassiveIncomeCard(
+                    // 被动收入目标卡片（可点击）
+                    ClickablePassiveIncomeCard(
                         targetAmount: annualPassiveIncomeGoal,
                         currentAmount: totalAnnualDividend
                     )
