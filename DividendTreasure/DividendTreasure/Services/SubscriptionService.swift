@@ -122,6 +122,28 @@ struct FeaturePermissions {
     }
 }
 
+// MARK: - 订阅错误
+
+enum SubscriptionError: Error, LocalizedError {
+    case productNotFound
+    case verificationFailed
+    case purchasePending
+    case unknown
+
+    var errorDescription: String? {
+        switch self {
+        case .productNotFound:
+            return "订阅产品未配置"
+        case .verificationFailed:
+            return "交易验证失败"
+        case .purchasePending:
+            return "购买等待审批"
+        case .unknown:
+            return "未知错误"
+        }
+    }
+}
+
 // MARK: - 订阅服务
 
 @MainActor
@@ -131,9 +153,15 @@ class SubscriptionService: ObservableObject {
     @Published var currentTier: SubscriptionTier = .free
     @Published var status: SubscriptionStatus = .free
     @Published var permissions: FeaturePermissions = .forTier(.free)
+    @Published var lastError: String?
 
     private var products: [Product] = []
     private var updateTask: Task<Void, Never>?
+
+    /// 是否已加载产品
+    var hasLoadedProducts: Bool {
+        !products.isEmpty
+    }
 
     private init() {
         loadProducts()
@@ -149,8 +177,14 @@ class SubscriptionService: ObservableObject {
             do {
                 let storeProducts = try await Product.products(for: productIDs)
                 products = Array(storeProducts)
+                if products.isEmpty {
+                    print("⚠️ No products loaded. Check StoreKit configuration.")
+                } else {
+                    print("✅ Loaded \(products.count) products")
+                }
             } catch {
-                print("Failed to load products: \(error)")
+                print("❌ Failed to load products: \(error)")
+                lastError = "无法加载订阅产品"
             }
         }
     }
@@ -181,9 +215,11 @@ class SubscriptionService: ObservableObject {
     // MARK: - 购买订阅
 
     func purchase(_ tier: SubscriptionTier) async throws -> Bool {
+        // 检查产品是否已加载
         guard let productID = tier.productID,
               let product = products.first(where: { $0.id == productID }) else {
-            return false
+            lastError = "订阅产品未配置，请在 App Store Connect 中添加产品"
+            throw SubscriptionError.productNotFound
         }
 
         let result = try await product.purchase()
@@ -196,17 +232,31 @@ class SubscriptionService: ObservableObject {
                 status = .subscribed(tier)
                 permissions = FeaturePermissions.forTier(tier)
                 await transaction.finish()
+                lastError = nil
                 return true
             case .unverified:
-                return false
+                lastError = "交易验证失败"
+                throw SubscriptionError.verificationFailed
             }
         case .userCancelled:
+            lastError = nil  // 用户取消不算错误
             return false
         case .pending:
-            return false
+            lastError = "购买等待审批"
+            throw SubscriptionError.purchasePending
         @unknown default:
-            return false
+            lastError = "未知购买结果"
+            throw SubscriptionError.unknown
         }
+    }
+
+    /// 模拟订阅成功（仅用于开发测试）
+    func simulateSubscription(_ tier: SubscriptionTier) {
+        currentTier = tier
+        status = .subscribed(tier)
+        permissions = FeaturePermissions.forTier(tier)
+        lastError = nil
+        print("✅ Simulated subscription: \(tier.rawValue)")
     }
 
     // MARK: - 恢复购买

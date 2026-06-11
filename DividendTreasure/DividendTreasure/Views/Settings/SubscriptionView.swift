@@ -26,6 +26,11 @@ struct SubscriptionView: View {
                 // 订阅选项
                 SubscriptionOptionsCard(isPurchasing: $isPurchasing)
 
+                // 开发测试提示
+                #if DEBUG
+                DevTestSection()
+                #endif
+
                 // 恢复购买
                 RestorePurchaseButton()
             }
@@ -51,6 +56,9 @@ struct SubscriptionView: View {
             Button("确定", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .onDisappear {
+            subscriptionService.lastError = nil
         }
     }
 }
@@ -202,6 +210,8 @@ struct SubscriptionOptionRow: View {
     let tier: SubscriptionTier
     @Binding var isPurchasing: Bool
 
+    @StateObject private var subscriptionService = SubscriptionService.shared
+
     var body: some View {
         Button(action: { purchase() }) {
             HStack {
@@ -247,11 +257,59 @@ struct SubscriptionOptionRow: View {
         Task {
             isPurchasing = true
             do {
-                _ = try await SubscriptionService.shared.purchase(tier)
+                let success = try await subscriptionService.purchase(tier)
+                if !success && subscriptionService.lastError != nil {
+                    // 显示错误（用户取消不显示）
+                }
             } catch {
                 print("Purchase failed: \(error)")
             }
             isPurchasing = false
+        }
+    }
+}
+
+// MARK: - 开发测试区域
+
+struct DevTestSection: View {
+    @StateObject private var subscriptionService = SubscriptionService.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("🧪 开发测试")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+
+            Text("StoreKit 产品未配置，点击下方按钮模拟订阅成功")
+                .font(.caption)
+                .foregroundStyle(.orange)
+
+            HStack(spacing: 12) {
+                devTestButton(tier: .monthly)
+                devTestButton(tier: .quarterly)
+                devTestButton(tier: .yearly)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    private func devTestButton(tier: SubscriptionTier) -> some View {
+        Button {
+            subscriptionService.simulateSubscription(tier)
+        } label: {
+            Text(tier.rawValue)
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.1))
+                .foregroundStyle(.orange)
+                .cornerRadius(8)
         }
     }
 }
