@@ -21,8 +21,26 @@ enum SubscriptionTier: String, CaseIterable {
         switch self {
         case .free: return "免费"
         case .monthly: return "¥5/月"
-        case .quarterly: return "¥10/季度"
-        case .yearly: return "¥30/年"
+        case .quarterly: return "¥12/季度"
+        case .yearly: return "¥40/年"
+        }
+    }
+
+    /// 折扣信息（相比月度订阅）
+    var discount: String? {
+        switch self {
+        case .free, .monthly: return nil
+        case .quarterly: return "省20%"
+        case .yearly: return "省33%"
+        }
+    }
+
+    /// 每月实际价格
+    var monthlyEquivalent: String? {
+        switch self {
+        case .free, .monthly: return nil
+        case .quarterly: return "¥4/月"
+        case .yearly: return "¥3.3/月"
         }
     }
 

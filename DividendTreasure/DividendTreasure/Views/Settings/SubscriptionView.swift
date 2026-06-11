@@ -169,27 +169,25 @@ struct SubscriptionOptionsCard: View {
             VStack(spacing: 12) {
                 SubscriptionOptionRow(
                     tier: .monthly,
-                    price: "¥5/月",
-                    description: "适合短期试用",
                     isPurchasing: $isPurchasing
                 )
 
                 SubscriptionOptionRow(
                     tier: .quarterly,
-                    price: "¥10/季度",
-                    description: "推荐选择",
                     isPurchasing: $isPurchasing
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.accentColor, lineWidth: 2)
+                        .stroke(Color.orange, lineWidth: 2)
                 )
 
                 SubscriptionOptionRow(
                     tier: .yearly,
-                    price: "¥30/年",
-                    description: "最划算",
                     isPurchasing: $isPurchasing
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.orange, lineWidth: 2)
                 )
             }
         }
@@ -202,24 +200,38 @@ struct SubscriptionOptionsCard: View {
 
 struct SubscriptionOptionRow: View {
     let tier: SubscriptionTier
-    let price: String
-    let description: String
     @Binding var isPurchasing: Bool
 
     var body: some View {
         Button(action: { purchase() }) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(tier.rawValue)
-                        .font(.headline)
-                    Text(description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(tier.rawValue)
+                            .font(.headline)
+
+                        if let discount = tier.discount {
+                            Text(discount)
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .cornerRadius(4)
+                        }
+                    }
+
+                    if let monthly = tier.monthlyEquivalent {
+                        Text("相当于\(monthly)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()
 
-                Text(price)
+                Text(tier.price)
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundStyle(Color.accentColor)
