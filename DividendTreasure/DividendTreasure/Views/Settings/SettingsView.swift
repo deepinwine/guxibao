@@ -16,6 +16,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // 收藏入口
+                Section {
+                    NavigationLink(destination: WatchlistView()) {
+                        Label("我的收藏", systemImage: "star.fill")
+                    }
+                }
+
                 // 订阅状态
                 Section {
                     NavigationLink(destination: SubscriptionView()) {

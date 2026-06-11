@@ -31,11 +31,6 @@ struct RootTabView: View {
                     Label("日历", systemImage: "calendar")
                 }
 
-            WatchlistView()
-                .tabItem {
-                    Label("收藏", systemImage: "star.fill")
-                }
-
             SettingsView()
                 .tabItem {
                     Label("我的", systemImage: "person.fill")
