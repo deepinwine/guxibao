@@ -16,6 +16,11 @@ struct StockSearchView: View {
     @State private var errorMessage = ""
     @State private var showError = false
 
+    // 存储每只股票的详细数据
+    @State private var stockDetails: [String: StockData] = [:]
+    // 存储每只股票的加载状态
+    @State private var loadingStates: [String: Bool] = [:]
+
     let onSelect: (StockSearchResult, StockData?) -> Void
 
     var body: some View {
@@ -55,6 +60,8 @@ struct StockSearchView: View {
                     List(searchResults) { result in
                         StockSearchResultRow(
                             result: result,
+                            stockData: stockDetails[result.symbol],
+                            isLoading: loadingStates[result.symbol] ?? false,
                             onSelect: { selectedResult in
                                 selectStock(selectedResult)
                             }
@@ -82,6 +89,8 @@ struct StockSearchView: View {
 
         isSearching = true
         errorMessage = ""
+        stockDetails = [:]
+        loadingStates = [:]
 
         StockDataService.shared.searchStock(keyword: searchText) { result in
             DispatchQueue.main.async {
@@ -90,6 +99,10 @@ struct StockSearchView: View {
                 switch result {
                 case .success(let stocks):
                     searchResults = stocks
+                    // 并行加载每只股票的详细信息
+                    for stock in stocks {
+                        loadStockDetail(for: stock)
+                    }
                 case .failure(let error):
                     errorMessage = error.errorDescription ?? "未知错误"
                     showError = true
@@ -98,10 +111,36 @@ struct StockSearchView: View {
         }
     }
 
-    private func selectStock(_ result: StockSearchResult) {
-        // 获取股票详情数据
+    // 新增：加载单只股票的详细信息
+    private func loadStockDetail(for result: StockSearchResult) {
+        let symbol = result.symbol
+        loadingStates[symbol] = true
+
         StockDataService.shared.fetchStockData(symbol: result.symbol, marketCode: result.marketCode) { stockDataResult in
             DispatchQueue.main.async {
+                loadingStates[symbol] = false
+
+                if case .success(let data) = stockDataResult {
+                    stockDetails[symbol] = data
+                }
+            }
+        }
+    }
+
+    private func selectStock(_ result: StockSearchResult) {
+        // 优先使用已加载的缓存数据
+        if let cachedData = stockDetails[result.symbol] {
+            onSelect(result, cachedData)
+            dismiss()
+            return
+        }
+
+        // 无缓存时发起请求
+        loadingStates[result.symbol] = true
+        StockDataService.shared.fetchStockData(symbol: result.symbol, marketCode: result.marketCode) { stockDataResult in
+            DispatchQueue.main.async {
+                loadingStates[result.symbol] = false
+
                 let stockData: StockData?
                 if case .success(let data) = stockDataResult {
                     stockData = data
@@ -159,51 +198,120 @@ struct SearchBar: View {
 
 struct StockSearchResultRow: View {
     let result: StockSearchResult
+    let stockData: StockData?
+    let isLoading: Bool
     let onSelect: (StockSearchResult) -> Void
+
+    // 静态 DateFormatter 复用
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     var body: some View {
         Button(action: { onSelect(result) }) {
-            HStack(spacing: 12) {
-                // 市场标识
-                Circle()
-                    .fill(marketColor)
-                    .frame(width: 36, height: 36)
-                    .overlay {
-                        Text(marketBadge)
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 6) {
+                // 第一行：市场标识 + 名称
+                HStack(spacing: 12) {
+                    // 市场标识
+                    Circle()
+                        .fill(marketColor)
+                        .frame(width: 36, height: 36)
+                        .overlay {
+                            Text(marketBadge)
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.white)
+                        }
+
+                    // 股票信息
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(result.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        HStack(spacing: 8) {
+                            Text(result.symbol)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            Text(result.market)
+                                .font(.caption)
+                                .padding(4)
+                                .background(Color(.secondarySystemBackground))
+                                .cornerRadius(4)
+                        }
                     }
 
-                // 股票信息
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(result.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                    Spacer()
 
-                    HStack(spacing: 8) {
-                        Text(result.symbol)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                        Text(result.market)
-                            .font(.caption)
-                            .padding(4)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(4)
-                    }
+                    // 选择提示
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Spacer()
-
-                // 选择提示
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // 第二行：股息详情
+                if isLoading {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                        Text("获取中...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, 48)
+                } else if let data = stockData {
+                    dividendDetailRow(data: data)
+                        .padding(.leading, 48)
+                } else {
+                    Text("暂无股息数据")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 48)
+                }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dividendDetailRow(data: StockData) -> some View {
+        HStack(spacing: 8) {
+            // 派息日期
+            if let date = data.dividendDate {
+                let formattedDate = formatDate(date)
+                Text("最近派息：\(formattedDate)")
+            } else {
+                Text("最近派息：暂无")
+            }
+
+            Text("·")
+
+            // 股息金额
+            if data.latestDividend > 0 {
+                Text(String(format: "%.3f元", data.latestDividend))
+            } else {
+                Text("暂无")
+            }
+
+            Text("·")
+
+            // 股息率
+            if data.dividendYield > 0 {
+                Text(String(format: "%.1f%%", data.dividendYield * 100))
+            } else {
+                Text("暂无")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        Self.dateFormatter.string(from: date)
     }
 
     private var marketColor: Color {
