@@ -230,6 +230,48 @@ class GridTradingService {
         return updatedHolding
     }
 
+    /// 按价格百分比快速生成档位
+    /// - Parameters:
+    ///   - holding: 持仓信息
+    ///   - percentStep: 价格百分比间距（如 0.02 表示 2%）
+    ///   - levelCount: 档位数量（上下各多少档）
+    ///   - baseQuantity: 每档基础数量（可选，不传则自动计算）
+    /// - Returns: 档位参数数组
+    func generateLevelsByPercent(holding: Holding, percentStep: Double, levelCount: Int, baseQuantity: Double? = nil) -> [GridLevelParams] {
+        var levels: [GridLevelParams] = []
+
+        let currentPrice = holding.currentPrice
+        guard currentPrice > 0 else { return levels }
+
+        let quantity = baseQuantity ?? calculateTradeQuantity(for: holding, at: currentPrice)
+
+        // 生成买入档位：价格低于当前价（每低一档，股息率更高）
+        for i in 1...levelCount {
+            let price = currentPrice * (1 - Double(i) * percentStep)
+            guard price > 0 else { break }
+
+            levels.append(GridLevelParams(
+                price: price,
+                direction: "买入",
+                quantity: quantity
+            ))
+        }
+
+        // 生成卖出档位：价格高于当前价（每高一档，股息率更低）
+        for i in 1...levelCount {
+            let price = currentPrice * (1 + Double(i) * percentStep)
+
+            levels.append(GridLevelParams(
+                price: price,
+                direction: "卖出",
+                quantity: quantity
+            ))
+        }
+
+        // 按价格排序（从低到高）
+        return levels.sorted { $0.price < $1.price }
+    }
+
     // MARK: - 私有辅助方法
 
     /// 计算交易数量（简单策略：基于持仓的一定比例）
