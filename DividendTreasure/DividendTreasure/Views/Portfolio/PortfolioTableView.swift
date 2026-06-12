@@ -63,8 +63,6 @@ struct PortfolioTableView: View {
     @State private var isRefreshing = false
     @State private var lastUpdateTime: Date?
     @State private var errorMessage: String?
-    @State private var sortOrder: TableColumnSortOrderPlacement = .forward
-    @State private var sortColumn: String = "name"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -113,8 +111,8 @@ struct PortfolioTableView: View {
                     description: Text("请先添加持仓数据")
                 )
             } else {
-                Table(sortedRows) {
-                    TableColumn("个股名称", value: \.name) { row in
+                Table(tableRows) {
+                    TableColumn("个股名称") { row in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.name)
                                 .font(.headline)
@@ -178,7 +176,6 @@ struct PortfolioTableView: View {
                     .width(min: 70, max: 100)
                 }
                 .tableStyle(.inset)
-                .alternatingRowBackgrounds(.enabled)
 
                 // 合计行
                 totalsSection
@@ -261,25 +258,6 @@ struct PortfolioTableView: View {
     }
 
     // MARK: - 计算属性
-
-    private var sortedRows: [HoldingTableRow] {
-        tableRows.sorted { a, b in
-            switch sortColumn {
-            case "name":
-                return sortOrder == .forward ? a.name < b.name : a.name > b.name
-            case "currentPrice":
-                let aPrice = a.currentPrice ?? 0
-                let bPrice = b.currentPrice ?? 0
-                return sortOrder == .forward ? aPrice < bPrice : aPrice > bPrice
-            case "actualYield":
-                let aYield = a.actualYield ?? 0
-                let bYield = b.actualYield ?? 0
-                return sortOrder == .forward ? aYield < bYield : aYield > bYield
-            default:
-                return sortOrder == .forward ? a.name < b.name : a.name > b.name
-            }
-        }
-    }
 
     private var totalDividend: Double {
         tableRows.reduce(0) { $0 + $1.totalDividend }
