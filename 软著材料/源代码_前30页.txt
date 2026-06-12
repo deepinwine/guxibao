@@ -1,0 +1,1596 @@
+============================================================
+软件名称：股息宝
+版本号：V1.0
+源程序代码（前30页）
+============================================================
+
+第 1 页
+------------------------------------------------------------
+   1  //
+   2  //  DividendTreasureApp.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  App 入口文件 - 配置 SwiftData（暂时禁用 CloudKit）
+   6  //
+   7  
+   8  import SwiftUI
+   9  import SwiftData
+  10  
+  11  @main
+  12  struct DividendTreasureApp: App {
+  13      let sharedModelContainer: ModelContainer
+  14  
+  15      init() {
+  16          // 定义数据模型 Schema
+  17          let schema = Schema([
+  18              Portfolio.self,
+  19              Holding.self,
+  20              DividendRecord.self,
+  21              WatchlistItem.self,
+  22              ImportBatch.self,
+  23              ImportCandidate.self,
+  24              StockData.self,
+  25              GridTradingLevel.self,
+  26              TradeRecord.self,
+  27          ])
+  28  
+  29          // 配置 SwiftData（暂时仅使用本地存储）
+  30          // TODO: 后续阶段配置 CloudKit
+  31          let modelConfiguration = ModelConfiguration(
+  32              schema: schema,
+  33              isStoredInMemoryOnly: false,
+  34              allowsSave: true
+  35          )
+  36  
+  37          do {
+  38              sharedModelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+  39          } catch {
+  40              fatalError("Could not create ModelContainer: \(error)")
+  41          }
+  42      }
+  43  
+  44      var body: some Scene {
+  45          WindowGroup {
+  46              RootTabView()
+  47                  .onAppear {
+  48                      // 首次启动时插入 Mock 数据（仅用于开发测试）
+  49                      setupMockDataIfNeeded()
+  50                  }
+
+第 2 页
+------------------------------------------------------------
+  51          }
+  52          .modelContainer(sharedModelContainer)
+  53      }
+  54  
+  55      private func setupMockDataIfNeeded() {
+  56          let context = sharedModelContainer.mainContext
+  57          let portfolioDescriptor = FetchDescriptor<Portfolio>()
+  58  
+  59          do {
+  60              let portfolios = try context.fetch(portfolioDescriptor)
+  61              if portfolios.isEmpty {
+  62                  // 仅在数据库为空时插入 Mock 数据
+  63                  MockDataService.createSampleData(in: context)
+  64              }
+  65          } catch {
+  66              print("Failed to check portfolios: \(error)")
+  67          }
+  68      }
+  69  }
+   1  //
+   2  //  DividendRecord.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  股息记录模型
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  enum DividendStatus: String, Codable {
+  12      case estimated = "预估"
+  13      case confirmed = "已确认"
+  14      case received = "已到账"
+  15  }
+  16  
+  17  @Model
+  18  final class DividendRecord {
+  19      @Attribute(.unique) var id: UUID
+  20      var symbol: String
+  21      var name: String
+  22      var exDividendDate: Date
+  23      var paymentDate: Date
+  24      var dividendPerShare: Double
+  25      var quantity: Double
+  26      var amount: Double
+  27      var currency: String
+  28      var status: String
+  29  
+  30      var holding: Holding?
+  31  
+
+第 3 页
+------------------------------------------------------------
+  32      init(
+  33          id: UUID = UUID(),
+  34          symbol: String,
+  35          name: String,
+  36          exDividendDate: Date,
+  37          paymentDate: Date,
+  38          dividendPerShare: Double,
+  39          quantity: Double,
+  40          amount: Double,
+  41          currency: String = "CNY",
+  42          status: String = "预估"
+  43      ) {
+  44          self.id = id
+  45          self.symbol = symbol
+  46          self.name = name
+  47          self.exDividendDate = exDividendDate
+  48          self.paymentDate = paymentDate
+  49          self.dividendPerShare = dividendPerShare
+  50          self.quantity = quantity
+  51          self.amount = amount
+  52          self.currency = currency
+  53          self.status = status
+  54      }
+  55  }
+  56  
+   1  //
+   2  //  GridTradingLevel.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  网格交易档位模型
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  @Model
+  12  final class GridTradingLevel {
+  13      @Attribute(.unique) var id: UUID
+  14      var holding: Holding?
+  15      var price: Double
+  16      var direction: String  // "买入" 或 "卖出"
+  17      var quantity: Double
+  18      var note: String
+  19      var isExecuted: Bool
+  20      var createdAt: Date
+  21      var updatedAt: Date
+  22  
+  23      // 计算属性：股息率
+  24      var yieldRate: Double {
+  25          guard let holding = holding,
+
+第 4 页
+------------------------------------------------------------
+  26                holding.annualDividendPerShare > 0,
+  27                price > 0 else { return 0 }
+  28          return holding.annualDividendPerShare / price
+  29      }
+  30  
+  31      init(
+  32          id: UUID = UUID(),
+  33          price: Double,
+  34          direction: String = "买入",
+  35          quantity: Double = 0,
+  36          note: String = "",
+  37          isExecuted: Bool = false,
+  38          createdAt: Date = Date(),
+  39          updatedAt: Date = Date()
+  40      ) {
+  41          self.id = id
+  42          self.price = price
+  43          self.direction = direction
+  44          self.quantity = quantity
+  45          self.note = note
+  46          self.isExecuted = isExecuted
+  47          self.createdAt = createdAt
+  48          self.updatedAt = updatedAt
+  49      }
+  50  }
+   1  //
+   2  //  Holding.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  持仓模型
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  enum Market: String, Codable, CaseIterable {
+  12      case aShare = "A股"
+  13      case hongKong = "港股"
+  14      case usStock = "美股"
+  15      case japan = "日股"
+  16      case other = "其他"
+  17  }
+  18  
+  19  enum AssetType: String, Codable, CaseIterable {
+  20      case stock = "股票"
+  21      case etf = "ETF"
+  22      case reit = "REITs"
+  23      case indexFund = "指数基金"
+  24      case bond = "债券"
+  25      case moneyFund = "货币基金"
+
+第 5 页
+------------------------------------------------------------
+  26      case cash = "现金"
+  27      case other = "其他"
+  28  }
+  29  
+  30  enum Industry: String, Codable, CaseIterable {
+  31      case bank = "银行"
+  32      case insurance = "保险"
+  33      case energy = "能源"
+  34      case utility = "公用事业"
+  35      case consumer = "消费"
+  36      case healthcare = "医药"
+  37      case technology = "科技"
+  38      case realEstate = "地产"
+  39      case telecommunication = "通信"
+  40      case other = "其他"
+  41  }
+  42  
+  43  @Model
+  44  final class Holding {
+  45      @Attribute(.unique) var id: UUID
+  46      var symbol: String
+  47      var name: String
+  48      var market: String
+  49      var assetType: String
+  50      var industry: String
+  51      var quantity: Double
+  52      var averageCost: Double
+  53      var currentPrice: Double
+  54      var annualDividendPerShare: Double
+  55      var expectedDividendMonths: String  // 逗号分隔的月份数字，如 "3,6,9,12"
+  56      var createdAt: Date
+  57      var updatedAt: Date
+  58  
+  59      var portfolio: Portfolio?
+  60  
+  61      // 计算属性：市值
+  62      var marketValue: Double {
+  63          quantity * currentPrice
+  64      }
+  65  
+  66      // 计算属性：年度股息
+  67      var annualDividend: Double {
+  68          quantity * annualDividendPerShare
+  69      }
+  70  
+  71      // 计算属性：股息率
+  72      var dividendYield: Double {
+  73          guard currentPrice > 0 else { return 0 }
+  74          return annualDividendPerShare / currentPrice
+  75      }
+
+第 6 页
+------------------------------------------------------------
+  76  
+  77      // 计算属性：浮盈浮亏
+  78      var profitLoss: Double {
+  79          (currentPrice - averageCost) * quantity
+  80      }
+  81  
+  82      // 计算属性：浮盈浮亏百分比
+  83      var profitLossPercent: Double {
+  84          guard averageCost > 0 else { return 0 }
+  85          return (currentPrice - averageCost) / averageCost
+  86      }
+  87  
+  88      init(
+  89          id: UUID = UUID(),
+  90          symbol: String,
+  91          name: String,
+  92          market: String = "A股",
+  93          assetType: String = "股票",
+  94          industry: String = "其他",
+  95          quantity: Double = 0,
+  96          averageCost: Double = 0,
+  97          currentPrice: Double = 0,
+  98          annualDividendPerShare: Double = 0,
+  99          expectedDividendMonths: String = "",
+ 100          createdAt: Date = Date(),
+ 101          updatedAt: Date = Date()
+ 102      ) {
+ 103          self.id = id
+ 104          self.symbol = symbol
+ 105          self.name = name
+ 106          self.market = market
+ 107          self.assetType = assetType
+ 108          self.industry = industry
+ 109          self.quantity = quantity
+ 110          self.averageCost = averageCost
+ 111          self.currentPrice = currentPrice
+ 112          self.annualDividendPerShare = annualDividendPerShare
+ 113          self.expectedDividendMonths = expectedDividendMonths
+ 114          self.createdAt = createdAt
+ 115          self.updatedAt = updatedAt
+ 116      }
+ 117  }
+ 118  
+   1  //
+   2  //  ImportBatch.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  导入批次模型
+   6  //
+   7  
+
+第 7 页
+------------------------------------------------------------
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  enum ImportSourceType: String, Codable {
+  12      case camera = "相机"
+  13      case photo = "相册"
+  14      case manual = "手动"
+  15  }
+  16  
+  17  enum ImportBatchStatus: String, Codable {
+  18      case pending = "待处理"
+  19      case processing = "处理中"
+  20      case completed = "已完成"
+  21      case failed = "失败"
+  22  }
+  23  
+  24  @Model
+  25  final class ImportBatch {
+  26      @Attribute(.unique) var id: UUID
+  27      var sourceType: String
+  28      var imageFileName: String?
+  29      var recognizedText: String?
+  30      var createdAt: Date
+  31      var status: String
+  32  
+  33      @Relationship(deleteRule: .cascade)
+  34      var candidates: [ImportCandidate] = []
+  35  
+  36      init(
+  37          id: UUID = UUID(),
+  38          sourceType: String = "手动",
+  39          imageFileName: String? = nil,
+  40          recognizedText: String? = nil,
+  41          createdAt: Date = Date(),
+  42          status: String = "待处理"
+  43      ) {
+  44          self.id = id
+  45          self.sourceType = sourceType
+  46          self.imageFileName = imageFileName
+  47          self.recognizedText = recognizedText
+  48          self.createdAt = createdAt
+  49          self.status = status
+  50      }
+  51  }
+  52  
+   1  //
+   2  //  ImportCandidate.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  导入候选持仓模型
+
+第 8 页
+------------------------------------------------------------
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  enum ImportCandidateStatus: String, Codable {
+  12      case pending = "待确认"
+  13      case confirmed = "已确认"
+  14      case ignored = "已忽略"
+  15  }
+  16  
+  17  @Model
+  18  final class ImportCandidate {
+  19      @Attribute(.unique) var id: UUID
+  20      var symbol: String?
+  21      var name: String?
+  22      var quantity: Double?
+  23      var currentPrice: Double?
+  24      var marketValue: Double?
+  25      var confidence: Double
+  26      var status: String
+  27  
+  28      var importBatch: ImportBatch?
+  29  
+  30      init(
+  31          id: UUID = UUID(),
+  32          symbol: String? = nil,
+  33          name: String? = nil,
+  34          quantity: Double? = nil,
+  35          currentPrice: Double? = nil,
+  36          marketValue: Double? = nil,
+  37          confidence: Double = 0,
+  38          status: String = "待确认"
+  39      ) {
+  40          self.id = id
+  41          self.symbol = symbol
+  42          self.name = name
+  43          self.quantity = quantity
+  44          self.currentPrice = currentPrice
+  45          self.marketValue = marketValue
+  46          self.confidence = confidence
+  47          self.status = status
+  48      }
+  49  }
+  50  
+   1  //
+   2  //  Portfolio.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  投资组合模型
+
+第 9 页
+------------------------------------------------------------
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  @Model
+  12  final class Portfolio {
+  13      @Attribute(.unique) var id: UUID
+  14      var name: String
+  15      var currency: String
+  16      var targetAnnualDividend: Double
+  17      var createdAt: Date
+  18      var updatedAt: Date
+  19  
+  20      @Relationship(deleteRule: .cascade, inverse: \Holding.portfolio)
+  21      var holdings: [Holding] = []
+  22  
+  23      init(
+  24          id: UUID = UUID(),
+  25          name: String,
+  26          currency: String = "CNY",
+  27          targetAnnualDividend: Double = 0,
+  28          createdAt: Date = Date(),
+  29          updatedAt: Date = Date()
+  30      ) {
+  31          self.id = id
+  32          self.name = name
+  33          self.currency = currency
+  34          self.targetAnnualDividend = targetAnnualDividend
+  35          self.createdAt = createdAt
+  36          self.updatedAt = updatedAt
+  37      }
+  38  }
+  39  
+   1  //
+   2  //  StockData.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  股票数据缓存模型 - 用于存储从API获取的股票信息
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  @Model
+  12  final class StockData {
+  13      @Attribute(.unique) var id: UUID
+  14      var symbol: String           // 股票代码（如：600036）
+  15      var name: String             // 股票名称（如：招商银行）
+  16      var market: String           // 市场（A股/港股/美股）
+
+第 10 页
+------------------------------------------------------------
+  17      var marketCode: String       // 市场代码（如：1=A股, 0=港股）
+  18      var currentPrice: Double     // 当前价格
+  19      var latestDividend: Double   // 最新每股分红（年度）
+  20      var dividendDate: Date?      // 最新分红日期
+  21      var dividendYield: Double    // 真实股息率（latestDividend / currentPrice）
+  22      var lastUpdated: Date        // 最后更新时间
+  23  
+  24      init(
+  25          id: UUID = UUID(),
+  26          symbol: String,
+  27          name: String,
+  28          market: String = "A股",
+  29          marketCode: String = "1",
+  30          currentPrice: Double = 0,
+  31          latestDividend: Double = 0,
+  32          dividendDate: Date? = nil,
+  33          dividendYield: Double = 0,
+  34          lastUpdated: Date = Date()
+  35      ) {
+  36          self.id = id
+  37          self.symbol = symbol
+  38          self.name = name
+  39          self.market = market
+  40          self.marketCode = marketCode
+  41          self.currentPrice = currentPrice
+  42          self.latestDividend = latestDividend
+  43          self.dividendDate = dividendDate
+  44          self.dividendYield = dividendYield
+  45          self.lastUpdated = lastUpdated
+  46      }
+  47  
+  48      // 计算真实股息率
+  49      func calculateRealYield() -> Double {
+  50          guard currentPrice > 0 else { return 0 }
+  51          return latestDividend / currentPrice
+  52      }
+  53  }
+  54  
+   1  //
+   2  //  TradeRecord.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  交易记录模型
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  @Model
+  12  final class TradeRecord {
+
+第 11 页
+------------------------------------------------------------
+  13      @Attribute(.unique) var id: UUID
+  14      var holding: Holding?
+  15      var date: Date
+  16      var direction: String  // "买入" 或 "卖出"
+  17      var price: Double
+  18      var quantity: Double
+  19      var amount: Double
+  20      var sourceType: String  // "手动输入" 或 "截图识别"
+  21      var ocrImageFileName: String?
+  22      var note: String
+  23      var createdAt: Date
+  24  
+  25      init(
+  26          id: UUID = UUID(),
+  27          date: Date = Date(),
+  28          direction: String = "买入",
+  29          price: Double = 0,
+  30          quantity: Double = 0,
+  31          amount: Double = 0,
+  32          sourceType: String = "手动输入",
+  33          ocrImageFileName: String? = nil,
+  34          note: String = "",
+  35          createdAt: Date = Date()
+  36      ) {
+  37          self.id = id
+  38          self.date = date
+  39          self.direction = direction
+  40          self.price = price
+  41          self.quantity = quantity
+  42          self.amount = amount
+  43          self.sourceType = sourceType
+  44          self.ocrImageFileName = ocrImageFileName
+  45          self.note = note
+  46          self.createdAt = createdAt
+  47      }
+  48  }
+  49  
+   1  //
+   2  //  WatchlistItem.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  收藏/关注股票模型
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  @Model
+  12  final class WatchlistItem {
+  13      @Attribute(.unique) var id: UUID
+
+第 12 页
+------------------------------------------------------------
+  14      var symbol: String
+  15      var name: String
+  16      var market: String
+  17      var currentPrice: Double
+  18      var annualDividendPerShare: Double
+  19      var targetBuyYield: Double
+  20      var targetSellYield: Double
+  21      var alertEnabled: Bool
+  22      var note: String
+  23      var createdAt: Date
+  24      var updatedAt: Date
+  25  
+  26      // 计算属性：当前股息率
+  27      var currentYield: Double {
+  28          guard currentPrice > 0 else { return 0 }
+  29          return annualDividendPerShare / currentPrice
+  30      }
+  31  
+  32      // 计算属性：目标买入价
+  33      var targetBuyPrice: Double {
+  34          guard targetBuyYield > 0 else { return 0 }
+  35          return annualDividendPerShare / targetBuyYield
+  36      }
+  37  
+  38      // 计算属性：目标卖出价
+  39      var targetSellPrice: Double {
+  40          guard targetSellYield > 0 else { return 0 }
+  41          return annualDividendPerShare / targetSellYield
+  42      }
+  43  
+  44      // 计算属性：是否触发买入提醒
+  45      var shouldAlertBuy: Bool {
+  46          guard alertEnabled && targetBuyYield > 0 && currentPrice > 0 else { return false }
+  47          return currentYield >= targetBuyYield
+  48      }
+  49  
+  50      // 计算属性：是否触发卖出提醒
+  51      var shouldAlertSell: Bool {
+  52          guard alertEnabled && targetSellYield > 0 && currentPrice > 0 else { return false }
+  53          return currentYield <= targetSellYield
+  54      }
+  55  
+  56      init(
+  57          id: UUID = UUID(),
+  58          symbol: String,
+  59          name: String,
+  60          market: String = "A股",
+  61          currentPrice: Double = 0,
+  62          annualDividendPerShare: Double = 0,
+  63          targetBuyYield: Double = 0,
+
+第 13 页
+------------------------------------------------------------
+  64          targetSellYield: Double = 0,
+  65          alertEnabled: Bool = false,
+  66          note: String = "",
+  67          createdAt: Date = Date(),
+  68          updatedAt: Date = Date()
+  69      ) {
+  70          self.id = id
+  71          self.symbol = symbol
+  72          self.name = name
+  73          self.market = market
+  74          self.currentPrice = currentPrice
+  75          self.annualDividendPerShare = annualDividendPerShare
+  76          self.targetBuyYield = targetBuyYield
+  77          self.targetSellYield = targetSellYield
+  78          self.alertEnabled = alertEnabled
+  79          self.note = note
+  80          self.createdAt = createdAt
+  81          self.updatedAt = updatedAt
+  82      }
+  83  }
+  84  
+   1  //
+   2  //  AssetInsightService.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  资产透视服务 - 按资产类型、行业、市场统计分布
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftUI
+  10  
+  11  // MARK: - 统计数据模型
+  12  
+  13  struct AssetBreakdown: Identifiable {
+  14      let id = UUID()
+  15      let category: String
+  16      let amount: Double
+  17      let percentage: Double
+  18      let holdings: [Holding]
+  19  
+  20      var displayAmount: String {
+  21          CurrencyFormatter.formatCompact(amount)
+  22      }
+  23  
+  24      var displayPercentage: String {
+  25          PercentFormatter.format(percentage)
+  26      }
+  27  }
+  28  
+  29  // MARK: - 资产透视服务
+
+第 14 页
+------------------------------------------------------------
+  30  
+  31  struct AssetInsightService {
+  32  
+  33      // MARK: - 按资产类型统计
+  34  
+  35      /// 按资产类型基础分类统计
+  36      static func breakdownByAssetType(holdings: [Holding]) -> [AssetBreakdown] {
+  37          let grouped = Dictionary(grouping: holdings) { holding in
+  38              // 基础分类映射
+  39              switch holding.assetType {
+  40              case "股票":
+  41                  return "股票"
+  42              case "ETF", "指数基金":
+  43                  return "基金"
+  44              case "债券":
+  45                  return "债券"
+  46              case "货币基金":
+  47                  return "现金"
+  48              default:
+  49                  return "其他"
+  50              }
+  51          }
+  52  
+  53          let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+  54  
+  55          return grouped.map { (category, items) in
+  56              let amount = items.reduce(0) { $0 + $1.marketValue }
+  57              let percentage = totalValue > 0 ? amount / totalValue : 0
+  58              return AssetBreakdown(
+  59                  category: category,
+  60                  amount: amount,
+  61                  percentage: percentage,
+  62                  holdings: items
+  63              )
+  64          }.sorted { $0.amount > $1.amount }
+  65      }
+  66  
+  67      /// 按资产类型细分统计
+  68      static func breakdownByAssetTypeDetail(holdings: [Holding]) -> [AssetBreakdown] {
+  69          let grouped = Dictionary(grouping: holdings) { $0.assetType }
+  70  
+  71          let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+  72  
+  73          return grouped.map { (category, items) in
+  74              let amount = items.reduce(0) { $0 + $1.marketValue }
+  75              let percentage = totalValue > 0 ? amount / totalValue : 0
+  76              return AssetBreakdown(
+  77                  category: category,
+  78                  amount: amount,
+  79                  percentage: percentage,
+
+第 15 页
+------------------------------------------------------------
+  80                  holdings: items
+  81              )
+  82          }.sorted { $0.amount > $1.amount }
+  83      }
+  84  
+  85      // MARK: - 按行业统计
+  86  
+  87      static func breakdownByIndustry(holdings: [Holding]) -> [AssetBreakdown] {
+  88          let grouped = Dictionary(grouping: holdings) { $0.industry }
+  89  
+  90          let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+  91  
+  92          return grouped.map { (category, items) in
+  93              let amount = items.reduce(0) { $0 + $1.marketValue }
+  94              let percentage = totalValue > 0 ? amount / totalValue : 0
+  95              return AssetBreakdown(
+  96                  category: category,
+  97                  amount: amount,
+  98                  percentage: percentage,
+  99                  holdings: items
+ 100              )
+ 101          }.sorted { $0.amount > $1.amount }
+ 102      }
+ 103  
+ 104      // MARK: - 按市场统计
+ 105  
+ 106      static func breakdownByMarket(holdings: [Holding]) -> [AssetBreakdown] {
+ 107          let grouped = Dictionary(grouping: holdings) { $0.market }
+ 108  
+ 109          let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+ 110  
+ 111          return grouped.map { (category, items) in
+ 112              let amount = items.reduce(0) { $0 + $1.marketValue }
+ 113              let percentage = totalValue > 0 ? amount / totalValue : 0
+ 114              return AssetBreakdown(
+ 115                  category: category,
+ 116                  amount: amount,
+ 117                  percentage: percentage,
+ 118                  holdings: items
+ 119              )
+ 120          }.sorted { $0.amount > $1.amount }
+ 121      }
+ 122  
+ 123      // MARK: - 统计概览
+ 124  
+ 125      /// 获取所有维度的统计概览
+ 126      static func getOverview(holdings: [Holding]) -> AssetInsightOverview {
+ 127          let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+ 128          let totalDividend = holdings.reduce(0) { $0 + $1.annualDividend }
+ 129          let avgYield = totalValue > 0 ? totalDividend / totalValue : 0
+
+第 16 页
+------------------------------------------------------------
+ 130  
+ 131          return AssetInsightOverview(
+ 132              totalValue: totalValue,
+ 133              totalDividend: totalDividend,
+ 134              avgYield: avgYield,
+ 135              holdingsCount: holdings.count,
+ 136              topAssetType: breakdownByAssetType(holdings: holdings).first?.category ?? "-",
+ 137              topIndustry: breakdownByIndustry(holdings: holdings).first?.category ?? "-",
+ 138              topMarket: breakdownByMarket(holdings: holdings).first?.category ?? "-"
+ 139          )
+ 140      }
+ 141  }
+ 142  
+ 143  // MARK: - 统计概览
+ 144  
+ 145  struct AssetInsightOverview {
+ 146      let totalValue: Double
+ 147      let totalDividend: Double
+ 148      let avgYield: Double
+ 149      let holdingsCount: Int
+ 150      let topAssetType: String
+ 151      let topIndustry: String
+ 152      let topMarket: String
+ 153  }
+ 154  
+ 155  // MARK: - 图表颜色
+ 156  
+ 157  extension AssetBreakdown {
+ 158      /// 获取分类颜色
+ 159      func getColor() -> AssetColor {
+ 160          switch category {
+ 161          // 资产类型
+ 162          case "股票":
+ 163              return .stock
+ 164          case "基金":
+ 165              return .fund
+ 166          case "债券":
+ 167              return .bond
+ 168          case "现金":
+ 169              return .cash
+ 170          case "其他":
+ 171              return .other
+ 172  
+ 173          // 行业
+ 174          case "银行":
+ 175              return .bank
+ 176          case "保险":
+ 177              return .insurance
+ 178          case "能源":
+ 179              return .energy
+
+第 17 页
+------------------------------------------------------------
+ 180          case "公用事业":
+ 181              return .utility
+ 182          case "消费":
+ 183              return .consumer
+ 184          case "医药":
+ 185              return .healthcare
+ 186          case "科技":
+ 187              return .technology
+ 188          case "地产":
+ 189              return .realEstate
+ 190          case "通信":
+ 191              return .telecom
+ 192  
+ 193          // 市场
+ 194          case "A股":
+ 195              return .aShare
+ 196          case "港股":
+ 197              return .hongKong
+ 198          case "美股":
+ 199              return .usStock
+ 200  
+ 201          default:
+ 202              return .other
+ 203          }
+ 204      }
+ 205  }
+ 206  
+ 207  // MARK: - 资产颜色枚举
+ 208  
+ 209  enum AssetColor: String {
+ 210      case stock = "股票"
+ 211      case fund = "基金"
+ 212      case bond = "债券"
+ 213      case cash = "现金"
+ 214      case other = "其他"
+ 215  
+ 216      case bank = "银行"
+ 217      case insurance = "保险"
+ 218      case energy = "能源"
+ 219      case utility = "公用事业"
+ 220      case consumer = "消费"
+ 221      case healthcare = "医药"
+ 222      case technology = "科技"
+ 223      case realEstate = "地产"
+ 224      case telecom = "通信"
+ 225  
+ 226      case aShare = "A股"
+ 227      case hongKong = "港股"
+ 228      case usStock = "美股"
+ 229  
+
+第 18 页
+------------------------------------------------------------
+ 230      var color: Color {
+ 231          switch self {
+ 232          case .stock: return .blue
+ 233          case .fund: return .purple
+ 234          case .bond: return .green
+ 235          case .cash: return .yellow
+ 236          case .other: return .gray
+ 237  
+ 238          case .bank: return .red
+ 239          case .insurance: return .orange
+ 240          case .energy: return .yellow
+ 241          case .utility: return .cyan
+ 242          case .consumer: return .pink
+ 243          case .healthcare: return .green
+ 244          case .technology: return .blue
+ 245          case .realEstate: return .brown
+ 246          case .telecom: return .indigo
+ 247  
+ 248          case .aShare: return .red
+ 249          case .hongKong: return .orange
+ 250          case .usStock: return .blue
+ 251          }
+ 252      }
+ 253  }
+ 254  
+   1  //
+   2  //  CalculationService.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  集中计算逻辑服务
+   6  //
+   7  
+   8  import Foundation
+   9  
+  10  struct CalculationService {
+  11  
+  12      // MARK: - 持仓计算
+  13  
+  14      /// 计算持仓市值
+  15      static func marketValue(quantity: Double, currentPrice: Double) -> Double {
+  16          return quantity * currentPrice
+  17      }
+  18  
+  19      /// 计算持仓年度股息
+  20      static func annualDividend(quantity: Double, dividendPerShare: Double) -> Double {
+  21          return quantity * dividendPerShare
+  22      }
+  23  
+  24      /// 计算持仓股息率
+  25      static func dividendYield(dividendPerShare: Double, currentPrice: Double) -> Double {
+
+第 19 页
+------------------------------------------------------------
+  26          guard currentPrice > 0 else { return 0 }
+  27          return dividendPerShare / currentPrice
+  28      }
+  29  
+  30      /// 计算持仓浮盈浮亏
+  31      static func profitLoss(quantity: Double, averageCost: Double, currentPrice: Double) -> Double {
+  32          return (currentPrice - averageCost) * quantity
+  33      }
+  34  
+  35      /// 计算持仓浮盈浮亏百分比
+  36      static func profitLossPercent(averageCost: Double, currentPrice: Double) -> Double {
+  37          guard averageCost > 0 else { return 0 }
+  38          return (currentPrice - averageCost) / averageCost
+  39      }
+  40  
+  41      // MARK: - 组合计算
+  42  
+  43      /// 计算组合总市值
+  44      static func portfolioMarketValue(holdings: [Holding]) -> Double {
+  45          return holdings.reduce(0) { $0 + $1.marketValue }
+  46      }
+  47  
+  48      /// 计算组合年度股息
+  49      static func portfolioAnnualDividend(holdings: [Holding]) -> Double {
+  50          return holdings.reduce(0) { $0 + $1.annualDividend }
+  51      }
+  52  
+  53      /// 计算组合股息率
+  54      static func portfolioDividendYield(holdings: [Holding]) -> Double {
+  55          let marketValue = portfolioMarketValue(holdings: holdings)
+  56          let dividend = portfolioAnnualDividend(holdings: holdings)
+  57          guard marketValue > 0 else { return 0 }
+  58          return dividend / marketValue
+  59      }
+  60  
+  61      // MARK: - 年度目标计算
+  62  
+  63      /// 计算年度目标完成率
+  64      static func goalProgress(currentDividend: Double, targetDividend: Double) -> Double {
+  65          guard targetDividend > 0 else { return 0 }
+  66          return min(currentDividend / targetDividend, 1.0)
+  67      }
+  68  
+  69      // MARK: - 收藏股息率计算
+  70  
+  71      /// 计算当前股息率（收藏）
+  72      static func currentYield(dividendPerShare: Double, currentPrice: Double) -> Double {
+  73          return dividendYield(dividendPerShare: dividendPerShare, currentPrice: currentPrice)
+  74      }
+  75  
+
+第 20 页
+------------------------------------------------------------
+  76      /// 计算目标买入价
+  77      static func targetBuyPrice(dividendPerShare: Double, targetYield: Double) -> Double {
+  78          guard targetYield > 0 else { return 0 }
+  79          return dividendPerShare / targetYield
+  80      }
+  81  
+  82      /// 计算目标卖出价
+  83      static func targetSellPrice(dividendPerShare: Double, targetYield: Double) -> Double {
+  84          guard targetYield > 0 else { return 0 }
+  85          return dividendPerShare / targetYield
+  86      }
+  87  
+  88      // MARK: - 排行榜计算
+  89  
+  90      /// 获取市值排行榜
+  91      static func holdingsByMarketValue(holdings: [Holding]) -> [Holding] {
+  92          return holdings.sorted { $0.marketValue > $1.marketValue }
+  93      }
+  94  
+  95      /// 获取股息贡献排行榜
+  96      static func holdingsByDividend(holdings: [Holding]) -> [Holding] {
+  97          return holdings.sorted { $0.annualDividend > $1.annualDividend }
+  98      }
+  99  
+ 100      /// 获取股息率排行榜
+ 101      static func holdingsByYield(holdings: [Holding]) -> [Holding] {
+ 102          return holdings.sorted { $0.dividendYield > $1.dividendYield }
+ 103      }
+ 104  
+ 105      /// 获取浮盈排行榜
+ 106      static func holdingsByProfit(holdings: [Holding]) -> [Holding] {
+ 107          return holdings.sorted { $0.profitLoss > $1.profitLoss }
+ 108      }
+ 109  }
+ 110  
+   1  //
+   2  //  CashflowService.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  现金流服务 - 股息现金流统计和预测
+   6  //
+   7  
+   8  import Foundation
+   9  
+  10  // MARK: - 月度股息数据
+  11  
+  12  struct MonthlyDividend: Identifiable {
+  13      let id = UUID()
+  14      let month: Int
+  15      let year: Int
+
+第 21 页
+------------------------------------------------------------
+  16      let amount: Double
+  17      let records: [DividendRecord]
+  18  
+  19      var monthName: String {
+  20          "\(year)年\(month)月"
+  21      }
+  22  
+  23      var shortName: String {
+  24          "\(month)月"
+  25      }
+  26  }
+  27  
+  28  // MARK: - 股息预测数据
+  29  
+  30  struct DividendForecast: Identifiable {
+  31      let id = UUID()
+  32      let symbol: String
+  33      let name: String
+  34      let expectedDate: Date
+  35      let expectedAmount: Double
+  36      let confidence: Double // 0-1，置信度
+  37  
+  38      var monthName: String {
+  39          let formatter = DateFormatter()
+  40          formatter.dateFormat = "M月"
+  41          return formatter.string(from: expectedDate)
+  42      }
+  43  }
+  44  
+  45  // MARK: - 股息排行数据
+  46  
+  47  struct DividendRanking: Identifiable {
+  48      let id = UUID()
+  49      let symbol: String
+  50      let name: String
+  51      let annualDividend: Double
+  52      let dividendYield: Double
+  53      let marketValue: Double
+  54      let holding: Holding
+  55  
+  56      var displayAmount: String {
+  57          CurrencyFormatter.formatCompact(annualDividend)
+  58      }
+  59  }
+  60  
+  61  // MARK: - 现金流服务
+  62  
+  63  struct CashflowService {
+  64  
+  65      // MARK: - 年度股息统计
+
+第 22 页
+------------------------------------------------------------
+  66  
+  67      /// 获取年度股息统计
+  68      static func getAnnualDividendSummary(holdings: [Holding]) -> (total: Double, monthly: [MonthlyDividend]) {
+  69          let total = holdings.reduce(0) { $0 + $1.annualDividend }
+  70  
+  71          // 按月统计（根据预计派息月份）
+  72          var monthlyData: [Int: Double] = [:]
+  73          for month in 1...12 {
+  74              monthlyData[month] = 0
+  75          }
+  76  
+  77          for holding in holdings {
+  78              let months = parseDividendMonths(holding.expectedDividendMonths)
+  79              let dividendPerMonth = months.isEmpty ? 0 : holding.annualDividend / Double(months.count)
+  80  
+  81              for month in months {
+  82                  monthlyData[month, default: 0] += dividendPerMonth
+  83              }
+  84          }
+  85  
+  86          let currentYear = Calendar.current.component(.year, from: Date())
+  87          let monthly = monthlyData.map { (month, amount) -> MonthlyDividend in
+  88              MonthlyDividend(month: month, year: currentYear, amount: amount, records: [])
+  89          }.sorted { $0.month < $1.month }
+  90  
+  91          return (total, monthly)
+  92      }
+  93  
+  94      // MARK: - 未来三个月股息预测
+  95  
+  96      /// 预测未来三个月的股息
+  97      static func forecastNextThreeMonths(holdings: [Holding]) -> [DividendForecast] {
+  98          let calendar = Calendar.current
+  99          let now = Date()
+ 100          var forecasts: [DividendForecast] = []
+ 101  
+ 102          // 获取未来三个月
+ 103          for monthOffset in 0..<3 {
+ 104              guard let futureDate = calendar.date(byAdding: .month, value: monthOffset, to: now) else {
+ 105                  continue
+ 106              }
+ 107  
+ 108              let targetMonth = calendar.component(.month, from: futureDate)
+ 109              let targetYear = calendar.component(.year, from: futureDate)
+ 110  
+ 111              for holding in holdings {
+ 112                  let months = parseDividendMonths(holding.expectedDividendMonths)
+ 113  
+ 114                  if months.contains(targetMonth) {
+ 115                      // 预计派息日期（月中）
+
+第 23 页
+------------------------------------------------------------
+ 116                      var components = DateComponents()
+ 117                      components.year = targetYear
+ 118                      components.month = targetMonth
+ 119                      components.day = 15
+ 120  
+ 121                      if let expectedDate = calendar.date(from: components) {
+ 122                          let forecast = DividendForecast(
+ 123                              symbol: holding.symbol,
+ 124                              name: holding.name,
+ 125                              expectedDate: expectedDate,
+ 126                              expectedAmount: holding.annualDividend,
+ 127                              confidence: holding.currentPrice > 0 ? 0.8 : 0.5
+ 128                          )
+ 129                          forecasts.append(forecast)
+ 130                      }
+ 131                  }
+ 132              }
+ 133          }
+ 134  
+ 135          return forecasts.sorted { $0.expectedDate < $1.expectedDate }
+ 136      }
+ 137  
+ 138      // MARK: - 股息排行榜
+ 139  
+ 140      /// 按年度股息贡献排行
+ 141      static func getDividendRanking(holdings: [Holding]) -> [DividendRanking] {
+ 142          return holdings
+ 143              .filter { $0.annualDividend > 0 }
+ 144              .map { holding in
+ 145                  DividendRanking(
+ 146                      symbol: holding.symbol,
+ 147                      name: holding.name,
+ 148                      annualDividend: holding.annualDividend,
+ 149                      dividendYield: holding.dividendYield,
+ 150                      marketValue: holding.marketValue,
+ 151                      holding: holding
+ 152                  )
+ 153              }
+ 154              .sorted { $0.annualDividend > $1.annualDividend }
+ 155      }
+ 156  
+ 157      /// 按组合维度统计股息
+ 158      static func getDividendByPortfolio(portfolios: [Portfolio]) -> [(name: String, amount: Double)] {
+ 159          return portfolios
+ 160              .map { ($0.name, $0.holdings.reduce(0) { $0 + $1.annualDividend }) }
+ 161              .sorted { $0.1 > $1.1 }
+ 162      }
+ 163  
+ 164      /// 按市场维度统计股息
+ 165      static func getDividendByMarket(holdings: [Holding]) -> [(market: String, amount: Double)] {
+
+第 24 页
+------------------------------------------------------------
+ 166          let grouped = Dictionary(grouping: holdings) { $0.market }
+ 167          return grouped
+ 168              .map { ($0.key, $0.value.reduce(0) { $0 + $1.annualDividend }) }
+ 169              .sorted { $0.1 > $1.1 }
+ 170      }
+ 171  
+ 172      // MARK: - 辅助方法
+ 173  
+ 174      /// 解析派息月份字符串
+ 175      private static func parseDividendMonths(_ monthsString: String) -> [Int] {
+ 176          guard !monthsString.isEmpty else { return [] }
+ 177  
+ 178          let components = monthsString.components(separatedBy: ",")
+ 179          return components.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+ 180      }
+ 181  
+ 182      // MARK: - 年度目标进度
+ 183  
+ 184      /// 计算年度目标完成进度
+ 185      static func getGoalProgress(holdings: [Holding], target: Double) -> (current: Double, target: Double, percentage: Double) {
+ 186          let current = holdings.reduce(0) { $0 + $1.annualDividend }
+ 187          let percentage = target > 0 ? current / target : 0
+ 188          return (current, target, percentage)
+ 189      }
+ 190  }
+ 191  
+   1  //
+   2  //  DataExportService.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  数据导出服务 - 导出持仓数据为CSV/JSON
+   6  //
+   7  
+   8  import Foundation
+   9  import SwiftData
+  10  
+  11  struct DataExportService {
+  12  
+  13      // MARK: - 导出CSV
+  14  
+  15      /// 导出持仓数据为CSV格式
+  16      static func exportHoldingsToCSV(_ holdings: [Holding]) -> URL? {
+  17          var csv = "代码,名称,市场,资产类型,行业,数量,成本价,现价,年度每股股息,预计派息月份,市值,年度股息,股息率\n"
+  18  
+  19          for holding in holdings {
+  20              let row = [
+  21                  holding.symbol,
+  22                  holding.name,
+  23                  holding.market,
+  24                  holding.assetType,
+
+第 25 页
+------------------------------------------------------------
+  25                  holding.industry,
+  26                  String(format: "%.0f", holding.quantity),
+  27                  String(format: "%.2f", holding.averageCost),
+  28                  String(format: "%.2f", holding.currentPrice),
+  29                  String(format: "%.4f", holding.annualDividendPerShare),
+  30                  holding.expectedDividendMonths,
+  31                  String(format: "%.2f", holding.marketValue),
+  32                  String(format: "%.2f", holding.annualDividend),
+  33                  String(format: "%.4f", holding.dividendYield)
+  34              ]
+  35              csv += row.joined(separator: ",") + "\n"
+  36          }
+  37  
+  38          // 保存文件
+  39          let tempDir = FileManager.default.temporaryDirectory
+  40          let fileURL = tempDir.appendingPathComponent("持仓数据_\(DateFormatter.fileNameDate.string(from: Date())).csv")
+  41  
+  42          do {
+  43              try csv.write(to: fileURL, atomically: true, encoding: .utf8)
+  44              return fileURL
+  45          } catch {
+  46              print("Failed to export CSV: \(error)")
+  47              return nil
+  48          }
+  49      }
+  50  
+  51      // MARK: - 导出JSON
+  52  
+  53      /// 导出持仓数据为JSON格式
+  54      static func exportHoldingsToJSON(_ holdings: [Holding]) -> URL? {
+  55          struct HoldingExport: Codable {
+  56              let symbol: String
+  57              let name: String
+  58              let market: String
+  59              let assetType: String
+  60              let industry: String
+  61              let quantity: Double
+  62              let averageCost: Double
+  63              let currentPrice: Double
+  64              let annualDividendPerShare: Double
+  65              let expectedDividendMonths: String
+  66          }
+  67  
+  68          let exportData = holdings.map { holding in
+  69              HoldingExport(
+  70                  symbol: holding.symbol,
+  71                  name: holding.name,
+  72                  market: holding.market,
+  73                  assetType: holding.assetType,
+  74                  industry: holding.industry,
+
+第 26 页
+------------------------------------------------------------
+  75                  quantity: holding.quantity,
+  76                  averageCost: holding.averageCost,
+  77                  currentPrice: holding.currentPrice,
+  78                  annualDividendPerShare: holding.annualDividendPerShare,
+  79                  expectedDividendMonths: holding.expectedDividendMonths
+  80              )
+  81          }
+  82  
+  83          do {
+  84              let encoder = JSONEncoder()
+  85              encoder.outputFormatting = .prettyPrinted
+  86              let jsonData = try encoder.encode(exportData)
+  87  
+  88              let tempDir = FileManager.default.temporaryDirectory
+  89              let fileURL = tempDir.appendingPathComponent("持仓数据_\(DateFormatter.fileNameDate.string(from: Date())).json")
+  90  
+  91              try jsonData.write(to: fileURL)
+  92              return fileURL
+  93          } catch {
+  94              print("Failed to export JSON: \(error)")
+  95              return nil
+  96          }
+  97      }
+  98  
+  99      // MARK: - 导入
+ 100  
+ 101      /// 从JSON导入持仓数据
+ 102      static func importHoldingsFromJSON(from url: URL, to portfolio: Portfolio, in context: ModelContext) -> Int {
+ 103          do {
+ 104              let data = try Data(contentsOf: url)
+ 105              let decoder = JSONDecoder()
+ 106              struct HoldingImport: Codable {
+ 107                  let symbol: String
+ 108                  let name: String
+ 109                  let market: String
+ 110                  let assetType: String
+ 111                  let industry: String
+ 112                  let quantity: Double
+ 113                  let averageCost: Double
+ 114                  let currentPrice: Double
+ 115                  let annualDividendPerShare: Double
+ 116                  let expectedDividendMonths: String
+ 117              }
+ 118  
+ 119              let importedHoldings = try decoder.decode([HoldingImport].self, from: data)
+ 120  
+ 121              for importData in importedHoldings {
+ 122                  let holding = Holding(
+ 123                      symbol: importData.symbol,
+ 124                      name: importData.name,
+
+第 27 页
+------------------------------------------------------------
+ 125                      market: importData.market,
+ 126                      assetType: importData.assetType,
+ 127                      industry: importData.industry,
+ 128                      quantity: importData.quantity,
+ 129                      averageCost: importData.averageCost,
+ 130                      currentPrice: importData.currentPrice,
+ 131                      annualDividendPerShare: importData.annualDividendPerShare,
+ 132                      expectedDividendMonths: importData.expectedDividendMonths
+ 133                  )
+ 134                  holding.portfolio = portfolio
+ 135                  context.insert(holding)
+ 136              }
+ 137  
+ 138              return importedHoldings.count
+ 139          } catch {
+ 140              print("Failed to import holdings: \(error)")
+ 141              return 0
+ 142          }
+ 143      }
+ 144  }
+ 145  
+ 146  // MARK: - DateFormatter扩展
+ 147  
+ 148  extension DateFormatter {
+ 149      static let fileNameDate: DateFormatter = {
+ 150          let formatter = DateFormatter()
+ 151          formatter.dateFormat = "yyyyMMdd_HHmmss"
+ 152          return formatter
+ 153      }()
+ 154  }
+ 155  
+   1  //
+   2  //  GridTradingService.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  网格交易计算服务
+   6  //
+   7  
+   8  import Foundation
+   9  
+  10  // MARK: - 网格交易计算服务
+  11  
+  12  class GridTradingService {
+  13  
+  14      // MARK: - 股息率计算
+  15  
+  16      /// 根据目标股息率计算目标价格
+  17      /// - Parameters:
+  18      ///   - annualDividendPerShare: 每股年度股息
+  19      ///   - targetYield: 目标股息率（例如 0.06 表示 6%）
+
+第 28 页
+------------------------------------------------------------
+  20      /// - Returns: 目标价格
+  21      func calculateTargetPrice(annualDividendPerShare: Double, targetYield: Double) -> Double {
+  22          guard targetYield > 0 else { return 0 }
+  23          return annualDividendPerShare / targetYield
+  24      }
+  25  
+  26      /// 计算股息率
+  27      /// - Parameters:
+  28      ///   - annualDividendPerShare: 每股年度股息
+  29      ///   - price: 当前价格
+  30      /// - Returns: 股息率
+  31      func calculateYield(annualDividendPerShare: Double, price: Double) -> Double {
+  32          guard price > 0 else { return 0 }
+  33          return annualDividendPerShare / price
+  34      }
+  35  
+  36      // MARK: - 档位生成
+  37  
+  38      /// 根据股息率网格模板生成档位
+  39      /// - Parameters:
+  40      ///   - holding: 持仓信息
+  41      ///   - parameters: 策略参数
+  42      /// - Returns: 档位参数数组
+  43      func generateDividendYieldGridLevels(holding: Holding, parameters: StrategyParameters) -> [GridLevelParams] {
+  44          var levels: [GridLevelParams] = []
+  45  
+  46          guard holding.annualDividendPerShare > 0 else { return levels }
+  47  
+  48          // 生成买入档位：从目标买入股息率开始，每增加一个步长对应一个更低的买入价
+  49          for i in 0..<parameters.levelCount {
+  50              let yield = parameters.targetBuyYield + Double(i) * parameters.yieldStep
+  51              let price = calculateTargetPrice(annualDividendPerShare: holding.annualDividendPerShare, targetYield: yield)
+  52              let quantity = calculateTradeQuantity(for: holding, at: price)
+  53  
+  54              levels.append(GridLevelParams(
+  55                  price: price,
+  56                  direction: "买入",
+  57                  quantity: quantity
+  58              ))
+  59          }
+  60  
+  61          // 生成卖出档位：从目标卖出租息率开始，每减少一个步长对应一个更高的卖出价
+  62          for i in 0..<parameters.levelCount {
+  63              let yield = parameters.targetSellYield - Double(i) * parameters.yieldStep
+  64              guard yield > 0 else { break }
+  65              let price = calculateTargetPrice(annualDividendPerShare: holding.annualDividendPerShare, targetYield: yield)
+  66              let quantity = calculateTradeQuantity(for: holding, at: price)
+  67  
+  68              levels.append(GridLevelParams(
+  69                  price: price,
+
+第 29 页
+------------------------------------------------------------
+  70                  direction: "卖出",
+  71                  quantity: quantity
+  72              ))
+  73          }
+  74  
+  75          // 按价格排序
+  76          return levels.sorted { $0.price < $1.price }
+  77      }
+  78  
+  79      /// 根据成本价档位模板生成档位
+  80      /// - Parameters:
+  81      ///   - holding: 持仓信息
+  82      ///   - parameters: 策略参数
+  83      /// - Returns: 档位参数数组
+  84      func generateCostPriceLevels(holding: Holding, parameters: StrategyParameters) -> [GridLevelParams] {
+  85          var levels: [GridLevelParams] = []
+  86  
+  87          let costPrice = parameters.costPrice > 0 ? parameters.costPrice : holding.averageCost
+  88          guard costPrice > 0 else { return levels }
+  89  
+  90          // 生成买入档位：低于成本价
+  91          for i in 1...parameters.levelCount {
+  92              let percentDown = Double(i) * parameters.percentStep
+  93              let price = costPrice * (1 - percentDown)
+  94              let quantity = calculateTradeQuantity(for: holding, at: price)
+  95  
+  96              levels.append(GridLevelParams(
+  97                  price: price,
+  98                  direction: "买入",
+  99                  quantity: quantity
+ 100              ))
+ 101          }
+ 102  
+ 103          // 生成卖出档位：高于成本价
+ 104          for i in 1...parameters.levelCount {
+ 105              let percentUp = Double(i) * parameters.percentStep
+ 106              let price = costPrice * (1 + percentUp)
+ 107              let quantity = calculateTradeQuantity(for: holding, at: price)
+ 108  
+ 109              levels.append(GridLevelParams(
+ 110                  price: price,
+ 111                  direction: "卖出",
+ 112                  quantity: quantity
+ 113              ))
+ 114          }
+ 115  
+ 116          // 按价格排序
+ 117          return levels.sorted { $0.price < $1.price }
+ 118      }
+ 119  
+
+第 30 页
+------------------------------------------------------------
+ 120      /// 根据动态再平衡模板生成档位
+ 121      /// - Parameters:
+ 122      ///   - holding: 持仓信息
+ 123      ///   - parameters: 策略参数
+ 124      /// - Returns: 档位参数数组
+ 125      func generateDynamicRebalanceLevels(holding: Holding, parameters: StrategyParameters) -> [GridLevelParams] {
+ 126          var levels: [GridLevelParams] = []
+ 127  
+ 128          guard holding.annualDividendPerShare > 0 else { return levels }
+ 129  
+ 130          // 计算当前股息率对应的价格区间边界
+ 131          let lowPrice = calculateTargetPrice(annualDividendPerShare: holding.annualDividendPerShare, targetYield: parameters.targetYieldHigh)
+ 132          let highPrice = calculateTargetPrice(annualDividendPerShare: holding.annualDividendPerShare, targetYield: parameters.targetYieldLow)
+ 133  
+ 134          // 在股息率过高（价格过低）时买入
+ 135          if holding.currentPrice <= lowPrice {
+ 136              let quantity = calculateTradeQuantity(for: holding, at: lowPrice)
+ 137              levels.append(GridLevelParams(
+ 138                  price: lowPrice,
+ 139                  direction: "买入",
+ 140                  quantity: quantity
+ 141              ))
+ 142          }
+ 143  
+ 144          // 在股息率过低（价格过高）时卖出
+ 145          if holding.currentPrice >= highPrice {
+ 146              let quantity = calculateTradeQuantity(for: holding, at: highPrice)
+ 147              levels.append(GridLevelParams(
+ 148                  price: highPrice,
+ 149                  direction: "卖出",
+ 150                  quantity: quantity
+ 151              ))
+ 152          }
+ 153  
+ 154          return levels
+ 155      }
+ 156  
+ 157      /// 快速生成档位
+ 158      /// - Parameters:
+ 159      ///   - holding: 持仓信息
+ 160      ///   - currentPrice: 当前价格
+ 161      ///   - yieldStep: 股息率步长
+ 162      ///   - levelCount: 档位数量
+ 163      /// - Returns: 档位参数数组
+ 164      func generateQuickLevels(holding: Holding, currentPrice: Double, yieldStep: Double, levelCount: Int) -> [GridLevelParams] {
+ 165          var levels: [GridLevelParams] = []
+ 166  
+ 167          guard holding.annualDividendPerShare > 0 else { return levels }
+ 168  
+ 169          let currentYield = calculateYield(annualDividendPerShare: holding.annualDividendPerShare, price: currentPrice)
+

@@ -119,8 +119,43 @@ struct PortfolioRow: View {
 struct PortfolioDetailView: View {
     let portfolio: Portfolio
     @State private var showingAddHolding = false
+    @State private var showTableView = false
 
     var body: some View {
+        Group {
+            if showTableView {
+                // 表格视图
+                PortfolioTableView(portfolio: portfolio)
+            } else {
+                // 列表视图
+                listView
+            }
+        }
+        .navigationTitle(portfolio.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 表格切换按钮
+            ToolbarItem(placement: .secondaryAction) {
+                Button(action: { showTableView.toggle() }) {
+                    Image(systemName: showTableView ? "list.bullet" : "tablecells")
+                }
+            }
+
+            // 添加持仓按钮
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { showingAddHolding = true }) {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddHolding) {
+            HoldingFormView(portfolio: portfolio)
+        }
+    }
+
+    // MARK: - 列表视图
+
+    private var listView: some View {
         List {
             // 组合统计信息
             Section("组合概览") {
@@ -176,18 +211,6 @@ struct PortfolioDetailView: View {
                     .onDelete(perform: deleteHoldings)
                 }
             }
-        }
-        .navigationTitle(portfolio.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: { showingAddHolding = true }) {
-                    Image(systemName: "plus")
-                }
-            }
-        }
-        .sheet(isPresented: $showingAddHolding) {
-            HoldingFormView(portfolio: portfolio)
         }
     }
 

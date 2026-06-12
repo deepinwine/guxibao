@@ -1,0 +1,1596 @@
+============================================================
+软件名称：股息宝
+版本号：V1.0
+源程序代码（后30页）
+============================================================
+
+第 31 页
+------------------------------------------------------------
+  41                      ContentUnavailableView(
+  42                          "未找到股票",
+  43                          systemImage: "magnifyingglass",
+  44                          description: Text("请检查输入的股票名称或代码")
+  45                      )
+  46                  } else if searchResults.isEmpty {
+  47                      VStack(spacing: 16) {
+  48                          Image(systemName: "magnifyingglass")
+  49                              .font(.system(size: 60))
+  50                              .foregroundStyle(.secondary)
+  51                          Text("输入股票名称或代码开始搜索")
+  52                              .font(.headline)
+  53                              .foregroundStyle(.secondary)
+  54                          Text("例如：招商银行 或 600036")
+  55                              .font(.caption)
+  56                              .foregroundStyle(.tertiary)
+  57                      }
+  58                      .frame(maxHeight: .infinity)
+  59                  } else {
+  60                      List(searchResults) { result in
+  61                          StockSearchResultRow(
+  62                              result: result,
+  63                              stockData: stockDetails[result.symbol],
+  64                              isLoading: loadingStates[result.symbol] ?? false,
+  65                              onSelect: { selectedResult in
+  66                                  selectStock(selectedResult)
+  67                              }
+  68                          )
+  69                      }
+  70                  }
+  71              }
+  72              .navigationTitle("股票搜索")
+  73              .navigationBarTitleDisplayMode(.inline)
+  74              .toolbar {
+  75                  ToolbarItem(placement: .cancellationAction) {
+  76                      Button("取消") { dismiss() }
+  77                  }
+  78              }
+  79              .alert("搜索失败", isPresented: $showError) {
+  80                  Button("确定", role: .cancel) { }
+  81              } message: {
+  82                  Text(errorMessage)
+  83              }
+  84          }
+  85      }
+  86  
+  87      private func performSearch() {
+  88          guard !searchText.isEmpty else { return }
+  89  
+  90          isSearching = true
+
+第 32 页
+------------------------------------------------------------
+  91          errorMessage = ""
+  92          stockDetails = [:]
+  93          loadingStates = [:]
+  94  
+  95          StockDataService.shared.searchStock(keyword: searchText) { result in
+  96              DispatchQueue.main.async {
+  97                  isSearching = false
+  98  
+  99                  switch result {
+ 100                  case .success(let stocks):
+ 101                      searchResults = stocks
+ 102                      // 并行加载每只股票的详细信息
+ 103                      for stock in stocks {
+ 104                          loadStockDetail(for: stock)
+ 105                      }
+ 106                  case .failure(let error):
+ 107                      errorMessage = error.errorDescription ?? "未知错误"
+ 108                      showError = true
+ 109                  }
+ 110              }
+ 111          }
+ 112      }
+ 113  
+ 114      // 新增：加载单只股票的详细信息
+ 115      private func loadStockDetail(for result: StockSearchResult) {
+ 116          let symbol = result.symbol
+ 117          loadingStates[symbol] = true
+ 118  
+ 119          StockDataService.shared.fetchStockData(symbol: result.symbol, marketCode: result.marketCode) { stockDataResult in
+ 120              DispatchQueue.main.async {
+ 121                  loadingStates[symbol] = false
+ 122  
+ 123                  if case .success(let data) = stockDataResult {
+ 124                      stockDetails[symbol] = data
+ 125                  }
+ 126              }
+ 127          }
+ 128      }
+ 129  
+ 130      private func selectStock(_ result: StockSearchResult) {
+ 131          // 优先使用已加载的缓存数据
+ 132          if let cachedData = stockDetails[result.symbol] {
+ 133              onSelect(result, cachedData)
+ 134              dismiss()
+ 135              return
+ 136          }
+ 137  
+ 138          // 无缓存时发起请求
+ 139          loadingStates[result.symbol] = true
+ 140          StockDataService.shared.fetchStockData(symbol: result.symbol, marketCode: result.marketCode) { stockDataResult in
+
+第 33 页
+------------------------------------------------------------
+ 141              DispatchQueue.main.async {
+ 142                  loadingStates[result.symbol] = false
+ 143  
+ 144                  let stockData: StockData?
+ 145                  if case .success(let data) = stockDataResult {
+ 146                      stockData = data
+ 147                  } else {
+ 148                      stockData = nil
+ 149                  }
+ 150  
+ 151                  onSelect(result, stockData)
+ 152                  dismiss()
+ 153              }
+ 154          }
+ 155      }
+ 156  }
+ 157  
+ 158  // MARK: - 搜索栏组件
+ 159  
+ 160  struct SearchBar: View {
+ 161      @Binding var text: String
+ 162      @Binding var isSearching: Bool
+ 163      let onSearch: () -> Void
+ 164  
+ 165      var body: some View {
+ 166          HStack(spacing: 12) {
+ 167              HStack(spacing: 8) {
+ 168                  Image(systemName: "magnifyingglass")
+ 169                      .foregroundStyle(.secondary)
+ 170  
+ 171                  TextField("输入股票名称或代码", text: $text)
+ 172                      .textFieldStyle(.plain)
+ 173                      .onSubmit {
+ 174                          onSearch()
+ 175                      }
+ 176  
+ 177                  if !text.isEmpty {
+ 178                      Button(action: { text = "" }) {
+ 179                          Image(systemName: "xmark.circle.fill")
+ 180                              .foregroundStyle(.secondary)
+ 181                      }
+ 182                  }
+ 183              }
+ 184              .padding(8)
+ 185              .background(Color(.secondarySystemBackground))
+ 186              .cornerRadius(10)
+ 187  
+ 188              Button("搜索") {
+ 189                  onSearch()
+ 190              }
+
+第 34 页
+------------------------------------------------------------
+ 191              .disabled(text.isEmpty)
+ 192          }
+ 193          .padding()
+ 194      }
+ 195  }
+ 196  
+ 197  // MARK: - 搜索结果行
+ 198  
+ 199  struct StockSearchResultRow: View {
+ 200      let result: StockSearchResult
+ 201      let stockData: StockData?
+ 202      let isLoading: Bool
+ 203      let onSelect: (StockSearchResult) -> Void
+ 204  
+ 205      // 静态 DateFormatter 复用
+ 206      private static let dateFormatter: DateFormatter = {
+ 207          let formatter = DateFormatter()
+ 208          formatter.dateFormat = "yyyy-MM-dd"
+ 209          return formatter
+ 210      }()
+ 211  
+ 212      var body: some View {
+ 213          Button(action: { onSelect(result) }) {
+ 214              VStack(alignment: .leading, spacing: 6) {
+ 215                  // 第一行：市场标识 + 名称
+ 216                  HStack(spacing: 12) {
+ 217                      // 市场标识
+ 218                      Circle()
+ 219                          .fill(marketColor)
+ 220                          .frame(width: 36, height: 36)
+ 221                          .overlay {
+ 222                              Text(marketBadge)
+ 223                                  .font(.caption2)
+ 224                                  .fontWeight(.bold)
+ 225                                  .foregroundStyle(.white)
+ 226                          }
+ 227  
+ 228                      // 股票信息
+ 229                      VStack(alignment: .leading, spacing: 4) {
+ 230                          Text(result.name)
+ 231                              .font(.headline)
+ 232                              .foregroundStyle(.primary)
+ 233  
+ 234                          HStack(spacing: 8) {
+ 235                              Text(result.symbol)
+ 236                                  .font(.subheadline)
+ 237                                  .foregroundStyle(.secondary)
+ 238  
+ 239                              Text(result.market)
+ 240                                  .font(.caption)
+
+第 35 页
+------------------------------------------------------------
+ 241                                  .padding(4)
+ 242                                  .background(Color(.secondarySystemBackground))
+ 243                                  .cornerRadius(4)
+ 244                          }
+ 245                      }
+ 246  
+ 247                      Spacer()
+ 248  
+ 249                      // 选择提示
+ 250                      Image(systemName: "chevron.right")
+ 251                          .font(.caption)
+ 252                          .foregroundStyle(.secondary)
+ 253                  }
+ 254  
+ 255                  // 第二行：股息详情
+ 256                  if isLoading {
+ 257                      HStack(spacing: 4) {
+ 258                          ProgressView()
+ 259                              .scaleEffect(0.7)
+ 260                          Text("获取中...")
+ 261                              .font(.caption)
+ 262                              .foregroundStyle(.secondary)
+ 263                      }
+ 264                      .padding(.leading, 48)
+ 265                  } else if let data = stockData {
+ 266                      dividendDetailRow(data: data)
+ 267                          .padding(.leading, 48)
+ 268                  } else {
+ 269                      Text("暂无股息数据")
+ 270                          .font(.caption)
+ 271                          .foregroundStyle(.tertiary)
+ 272                          .padding(.leading, 48)
+ 273                  }
+ 274              }
+ 275              .padding(.vertical, 6)
+ 276          }
+ 277          .buttonStyle(.plain)
+ 278      }
+ 279  
+ 280      @ViewBuilder
+ 281      private func dividendDetailRow(data: StockData) -> some View {
+ 282          HStack(spacing: 8) {
+ 283              // 派息日期
+ 284              if let date = data.dividendDate {
+ 285                  let formattedDate = formatDate(date)
+ 286                  Text("最近派息：\(formattedDate)")
+ 287              } else {
+ 288                  Text("最近派息：暂无")
+ 289              }
+ 290  
+
+第 36 页
+------------------------------------------------------------
+ 291              Text("·")
+ 292  
+ 293              // 股息金额
+ 294              if data.latestDividend > 0 {
+ 295                  Text(String(format: "%.3f元", data.latestDividend))
+ 296              } else {
+ 297                  Text("暂无")
+ 298              }
+ 299  
+ 300              Text("·")
+ 301  
+ 302              // 股息率
+ 303              if data.dividendYield > 0 {
+ 304                  Text(String(format: "%.1f%%", data.dividendYield * 100))
+ 305              } else {
+ 306                  Text("暂无")
+ 307              }
+ 308          }
+ 309          .font(.caption)
+ 310          .foregroundStyle(.secondary)
+ 311      }
+ 312  
+ 313      private func formatDate(_ date: Date) -> String {
+ 314          Self.dateFormatter.string(from: date)
+ 315      }
+ 316  
+ 317      private var marketColor: Color {
+ 318          switch result.market {
+ 319          case "A股":
+ 320              return .red
+ 321          case "港股":
+ 322              return .orange
+ 323          case "美股":
+ 324              return .blue
+ 325          default:
+ 326              return .gray
+ 327          }
+ 328      }
+ 329  
+ 330      private var marketBadge: String {
+ 331          switch result.market {
+ 332          case "A股":
+ 333              return "A"
+ 334          case "港股":
+ 335              return "H"
+ 336          case "美股":
+ 337              return "U"
+ 338          default:
+ 339              return "?"
+ 340          }
+
+第 37 页
+------------------------------------------------------------
+ 341      }
+ 342  }
+ 343  
+ 344  #Preview {
+ 345      StockSearchView { result, data in
+ 346          print("Selected: \(result.symbol) - \(result.name)")
+ 347      }
+ 348  }
+   1  //
+   2  //  RootTabView.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  Tab 根视图
+   6  //
+   7  
+   8  import SwiftUI
+   9  import SwiftData
+  10  
+  11  struct RootTabView: View {
+  12      var body: some View {
+  13          TabView {
+  14              DashboardView()
+  15                  .tabItem {
+  16                      Label("首页", systemImage: "house.fill")
+  17                  }
+  18  
+  19              PortfolioListView()
+  20                  .tabItem {
+  21                      Label("组合", systemImage: "briefcase.fill")
+  22                  }
+  23  
+  24              CashflowView()
+  25                  .tabItem {
+  26                      Label("现金流", systemImage: "chart.line.uptrend.xyaxis")
+  27                  }
+  28  
+  29              CalendarView()
+  30                  .tabItem {
+  31                      Label("日历", systemImage: "calendar")
+  32                  }
+  33  
+  34              SettingsView()
+  35                  .tabItem {
+  36                      Label("我的", systemImage: "person.fill")
+  37                  }
+  38          }
+  39      }
+  40  }
+  41  
+  42  #Preview {
+
+第 38 页
+------------------------------------------------------------
+  43      RootTabView()
+  44          .modelContainer(for: [Portfolio.self, Holding.self], inMemory: true)
+  45  }
+  46  
+   1  //
+   2  //  DataExportView.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  数据导出页面 - 导出持仓数据
+   6  //
+   7  
+   8  import SwiftUI
+   9  import SwiftData
+  10  import UniformTypeIdentifiers
+  11  
+  12  struct DataExportView: View {
+  13      @Query private var portfolios: [Portfolio]
+  14      @StateObject private var subscriptionService = SubscriptionService.shared
+  15      @State private var showingShareSheet = false
+  16      @State private var exportURL: URL?
+  17      @State private var showingUpgradePrompt = false
+  18  
+  19      var body: some View {
+  20          List {
+  21              Section {
+  22                  if !subscriptionService.permissions.tradingExportImport {
+  23                      HStack {
+  24                          Image(systemName: "lock.fill")
+  25                              .foregroundStyle(.orange)
+  26                          Text("会员功能")
+  27                              .foregroundStyle(.secondary)
+  28                          Spacer()
+  29                          Button("升级") {
+  30                              showingUpgradePrompt = true
+  31                          }
+  32                      }
+  33                  }
+  34              }
+  35  
+  36              Section("导出持仓数据") {
+  37                  Button(action: { exportToCSV() }) {
+  38                      Label("导出为CSV", systemImage: "doc.text")
+  39                  }
+  40                  .disabled(!subscriptionService.permissions.tradingExportImport)
+  41  
+  42                  Button(action: { exportToJSON() }) {
+  43                      Label("导出为JSON", systemImage: "doc.badge.plus")
+  44                  }
+  45                  .disabled(!subscriptionService.permissions.tradingExportImport)
+  46              }
+
+第 39 页
+------------------------------------------------------------
+  47  
+  48              Section("导入数据") {
+  49                  NavigationLink("从文件导入持仓") {
+  50                      DataImportView()
+  51                  }
+  52                  .disabled(!subscriptionService.permissions.tradingExportImport)
+  53              }
+  54          }
+  55          .navigationTitle("数据导入导出")
+  56          .sheet(isPresented: $showingShareSheet) {
+  57              if let url = exportURL {
+  58                  ShareSheet(items: [url])
+  59              }
+  60          }
+  61          .alert("升级到会员版", isPresented: $showingUpgradePrompt) {
+  62              Button("取消", role: .cancel) { }
+  63              Button("查看订阅") { }
+  64          } message: {
+  65              Text("数据导入导出功能需要订阅会员版")
+  66          }
+  67      }
+  68  
+  69      private var allHoldings: [Holding] {
+  70          portfolios.flatMap { $0.holdings }
+  71      }
+  72  
+  73      private func exportToCSV() {
+  74          guard subscriptionService.permissions.tradingExportImport else {
+  75              showingUpgradePrompt = true
+  76              return
+  77          }
+  78  
+  79          if let url = DataExportService.exportHoldingsToCSV(allHoldings) {
+  80              exportURL = url
+  81              showingShareSheet = true
+  82          }
+  83      }
+  84  
+  85      private func exportToJSON() {
+  86          guard subscriptionService.permissions.tradingExportImport else {
+  87              showingUpgradePrompt = true
+  88              return
+  89          }
+  90  
+  91          if let url = DataExportService.exportHoldingsToJSON(allHoldings) {
+  92              exportURL = url
+  93              showingShareSheet = true
+  94          }
+  95      }
+  96  }
+
+第 40 页
+------------------------------------------------------------
+  97  
+  98  // MARK: - 数据导入视图
+  99  
+ 100  struct DataImportView: View {
+ 101      @Environment(\.modelContext) private var modelContext
+ 102      @Query(sort: \Portfolio.createdAt, order: .reverse) private var portfolios: [Portfolio]
+ 103      @State private var showingFilePicker = false
+ 104      @State private var showingSuccess = false
+ 105      @State private var importedCount = 0
+ 106  
+ 107      var body: some View {
+ 108          VStack(spacing: 20) {
+ 109              ContentUnavailableView(
+ 110                  "导入持仓数据",
+ 111                  systemImage: "square.and.arrow.down",
+ 112                  description: Text("支持从JSON文件导入持仓数据")
+ 113              )
+ 114  
+ 115              Button("选择文件") {
+ 116                  showingFilePicker = true
+ 117              }
+ 118              .buttonStyle(.borderedProminent)
+ 119          }
+ 120          .fileImporter(
+ 121              isPresented: $showingFilePicker,
+ 122              allowedContentTypes: [.json],
+ 123              allowsMultipleSelection: false
+ 124          ) { result in
+ 125              switch result {
+ 126              case .success(let urls):
+ 127                  if let url = urls.first {
+ 128                      importData(from: url)
+ 129                  }
+ 130              case .failure(let error):
+ 131                  print("Failed to import: \(error)")
+ 132              }
+ 133          }
+ 134          .alert("导入成功", isPresented: $showingSuccess) {
+ 135              Button("确定", role: .cancel) { }
+ 136          } message: {
+ 137              Text("已成功导入 \(importedCount) 个持仓")
+ 138          }
+ 139      }
+ 140  
+ 141      private func importData(from url: URL) {
+ 142          guard let portfolio = portfolios.first else { return }
+ 143  
+ 144          let count = DataExportService.importHoldingsFromJSON(from: url, to: portfolio, in: modelContext)
+ 145          importedCount = count
+ 146          showingSuccess = true
+
+第 41 页
+------------------------------------------------------------
+ 147      }
+ 148  }
+ 149  
+ 150  // MARK: - ShareSheet
+ 151  
+ 152  struct ShareSheet: UIViewControllerRepresentable {
+ 153      let items: [Any]
+ 154  
+ 155      func makeUIViewController(context: Context) -> UIActivityViewController {
+ 156          UIActivityViewController(activityItems: items, applicationActivities: nil)
+ 157      }
+ 158  
+ 159      func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+ 160  }
+ 161  
+ 162  #Preview {
+ 163      NavigationStack {
+ 164          DataExportView()
+ 165      }
+ 166  }
+ 167  
+   1  //
+   2  //  SettingsView.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  设置视图
+   6  //
+   7  
+   8  import SwiftUI
+   9  import SwiftData
+  10  
+  11  struct SettingsView: View {
+  12      @AppStorage("annualPassiveIncomeGoal") private var annualPassiveIncomeGoal: Double = 50000
+  13      @AppStorage("defaultCurrency") private var defaultCurrency: String = "CNY"
+  14      @StateObject private var subscriptionService = SubscriptionService.shared
+  15  
+  16      var body: some View {
+  17          NavigationStack {
+  18              List {
+  19                  // 收藏入口
+  20                  Section {
+  21                      NavigationLink(destination: WatchlistView()) {
+  22                          Label("我的收藏", systemImage: "star.fill")
+  23                      }
+  24                  }
+  25  
+  26                  // 订阅状态
+  27                  Section {
+  28                      NavigationLink(destination: SubscriptionView()) {
+  29                          HStack {
+
+第 42 页
+------------------------------------------------------------
+  30                              VStack(alignment: .leading, spacing: 4) {
+  31                                  Text(subscriptionService.currentTier.rawValue)
+  32                                      .font(.headline)
+  33                                  if subscriptionService.status.isActive {
+  34                                      Text("会员功能已解锁")
+  35                                          .font(.caption)
+  36                                          .foregroundStyle(.green)
+  37                                  } else {
+  38                                      Text("升级解锁更多功能")
+  39                                          .font(.caption)
+  40                                          .foregroundStyle(.orange)
+  41                                  }
+  42                              }
+  43                              Spacer()
+  44                              Image(systemName: "chevron.right")
+  45                                  .font(.caption)
+  46                                  .foregroundStyle(.secondary)
+  47                          }
+  48                      }
+  49                  } header: {
+  50                      Text("会员订阅")
+  51                  }
+  52  
+  53                  Section("年度目标") {
+  54                      HStack {
+  55                          Text("被动收入目标")
+  56                          Spacer()
+  57                          TextField("目标", value: $annualPassiveIncomeGoal, format: .number)
+  58                              .keyboardType(.decimalPad)
+  59                              .multilineTextAlignment(.trailing)
+  60                              .frame(width: 100)
+  61                          Text("元")
+  62                      }
+  63                  }
+  64  
+  65                  Section("偏好设置") {
+  66                      Picker("默认货币", selection: $defaultCurrency) {
+  67                          Text("人民币 (CNY)").tag("CNY")
+  68                          Text("美元 (USD)").tag("USD")
+  69                          Text("港币 (HKD)").tag("HKD")
+  70                      }
+  71                  }
+  72  
+  73                  Section {
+  74                      NavigationLink("免责声明") {
+  75                          DisclaimerView()
+  76                      }
+  77  
+  78                      HStack {
+  79                          Text("iCloud 同步")
+
+第 43 页
+------------------------------------------------------------
+  80                          Spacer()
+  81                          Text("自动")
+  82                              .foregroundStyle(.secondary)
+  83                      }
+  84                  }
+  85  
+  86                  Section {
+  87                      HStack {
+  88                          Text("版本")
+  89                          Spacer()
+  90                          Text("1.0.0")
+  91                              .foregroundStyle(.secondary)
+  92                      }
+  93                  }
+  94              }
+  95              .navigationTitle("我的")
+  96          }
+  97      }
+  98  }
+  99  
+ 100  // MARK: - 免责声明视图
+ 101  
+ 102  struct DisclaimerView: View {
+ 103      var body: some View {
+ 104          ScrollView {
+ 105              VStack(alignment: .leading, spacing: 16) {
+ 106                  Text("免责声明")
+ 107                      .font(.title)
+ 108                      .fontWeight(.bold)
+ 109  
+ 110                  Text("""
+ 111                  本应用仅为个人财务数据管理工具，不构成任何投资建议。
+ 112  
+ 113                  1. 本应用不提供证券投资咨询、投资建议或推荐任何证券产品。
+ 114  
+ 115                  2. 应用内的所有数据均由用户自行录入，应用不对数据的准确性、完整性做任何保证。
+ 116  
+ 117                  3. 股息数据、价格数据仅供参考，实际情况请以券商或官方数据为准。
+ 118  
+ 119                  4. 投资有风险，入市需谨慎。用户应根据自身情况独立做出投资决策。
+ 120  
+ 121                  5. 本应用不会接入任何券商账户，不会执行任何交易操作。
+ 122  
+ 123                  6. 用户数据通过 iCloud 同步，数据安全由 Apple iCloud 服务保障。
+ 124                  """)
+ 125                      .font(.body)
+ 126                      .foregroundStyle(.secondary)
+ 127              }
+ 128              .padding()
+ 129          }
+
+第 44 页
+------------------------------------------------------------
+ 130          .navigationTitle("免责声明")
+ 131          .navigationBarTitleDisplayMode(.inline)
+ 132      }
+ 133  }
+ 134  
+ 135  #Preview {
+ 136      SettingsView()
+ 137  }
+ 138  
+   1  //
+   2  //  SubscriptionView.swift
+   3  //  DividendTreasure
+   4  //
+   5  //  订阅管理页面 - 显示免费版限制、订阅价格、购买按钮
+   6  //
+   7  
+   8  import SwiftUI
+   9  import StoreKit
+  10  
+  11  struct SubscriptionView: View {
+  12      @StateObject private var subscriptionService = SubscriptionService.shared
+  13      @State private var isPurchasing = false
+  14      @State private var showError = false
+  15      @State private var errorMessage = ""
+  16  
+  17      var body: some View {
+  18          ScrollView {
+  19              VStack(spacing: 24) {
+  20                  // 当前状态
+  21                  CurrentSubscriptionCard()
+  22  
+  23                  // 免费版限制
+  24                  FreeVersionLimitCard()
+  25  
+  26                  // 订阅选项
+  27                  SubscriptionOptionsCard(isPurchasing: $isPurchasing)
+  28  
+  29                  // 开发测试提示
+  30                  #if DEBUG
+  31                  DevTestSection()
+  32                  #endif
+  33  
+  34                  // 恢复购买
+  35                  RestorePurchaseButton()
+  36              }
+  37              .padding()
+  38          }
+  39          .background(Color(.systemGroupedBackground))
+  40          .navigationTitle("订阅管理")
+  41          .navigationBarTitleDisplayMode(.inline)
+
+第 45 页
+------------------------------------------------------------
+  42          .disabled(isPurchasing)
+  43          .overlay {
+  44              if isPurchasing {
+  45                  ZStack {
+  46                      Color.black.opacity(0.3)
+  47                          .ignoresSafeArea()
+  48                      ProgressView("处理中...")
+  49                          .padding()
+  50                          .background(.regularMaterial)
+  51                          .cornerRadius(12)
+  52                  }
+  53              }
+  54          }
+  55          .alert("购买失败", isPresented: $showError) {
+  56              Button("确定", role: .cancel) { }
+  57          } message: {
+  58              Text(errorMessage)
+  59          }
+  60          .onDisappear {
+  61              subscriptionService.lastError = nil
+  62          }
+  63      }
+  64  }
+  65  
+  66  // MARK: - 当前订阅卡片
+  67  
+  68  struct CurrentSubscriptionCard: View {
+  69      @StateObject private var subscriptionService = SubscriptionService.shared
+  70  
+  71      var body: some View {
+  72          VStack(alignment: .leading, spacing: 12) {
+  73              Text("当前订阅")
+  74                  .font(.headline)
+  75                  .foregroundStyle(.secondary)
+  76  
+  77              HStack {
+  78                  VStack(alignment: .leading, spacing: 4) {
+  79                      Text(subscriptionService.currentTier.rawValue)
+  80                          .font(.title2)
+  81                          .fontWeight(.bold)
+  82  
+  83                      if subscriptionService.status.isActive {
+  84                          Text("已激活")
+  85                              .font(.caption)
+  86                              .padding(4)
+  87                              .background(.green.opacity(0.2))
+  88                              .foregroundStyle(.green)
+  89                              .cornerRadius(4)
+  90                      } else {
+  91                          Text("未激活")
+
+第 46 页
+------------------------------------------------------------
+  92                              .font(.caption)
+  93                              .padding(4)
+  94                              .background(.orange.opacity(0.2))
+  95                              .foregroundStyle(.orange)
+  96                              .cornerRadius(4)
+  97                      }
+  98                  }
+  99  
+ 100                  Spacer()
+ 101  
+ 102                  Image(systemName: subscriptionService.status.isActive ? "checkmark.seal.fill" : "exclamationmark.triangle")
+ 103                      .font(.system(size: 40))
+ 104                      .foregroundStyle(subscriptionService.status.isActive ? .green : .orange)
+ 105              }
+ 106          }
+ 107          .padding()
+ 108          .background(Color(.systemBackground))
+ 109          .cornerRadius(12)
+ 110          .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+ 111      }
+ 112  }
+ 113  
+ 114  // MARK: - 免费版限制卡片
+ 115  
+ 116  struct FreeVersionLimitCard: View {
+ 117      @StateObject private var subscriptionService = SubscriptionService.shared
+ 118  
+ 119      var body: some View {
+ 120          VStack(alignment: .leading, spacing: 12) {
+ 121              Text("免费版限制")
+ 122                  .font(.headline)
+ 123                  .foregroundStyle(.secondary)
+ 124  
+ 125              VStack(alignment: .leading, spacing: 8) {
+ 126                  LimitRow(title: "投资组合", limit: "最多1个", isPro: subscriptionService.status.isActive)
+ 127                  LimitRow(title: "持仓数量", limit: "每个组合最多5个", isPro: subscriptionService.status.isActive)
+ 128                  LimitRow(title: "iCloud同步", limit: "不支持", isPro: subscriptionService.status.isActive)
+ 129                  LimitRow(title: "交易导入导出", limit: "不支持", isPro: subscriptionService.status.isActive)
+ 130                  LimitRow(title: "AI智能洞察", limit: "不支持", isPro: subscriptionService.status.isActive)
+ 131                  LimitRow(title: "日历视图", limit: "不支持", isPro: subscriptionService.status.isActive)
+ 132              }
+ 133          }
+ 134          .padding()
+ 135          .background(Color(.systemBackground))
+ 136          .cornerRadius(12)
+ 137          .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+ 138      }
+ 139  }
+ 140  
+ 141  struct LimitRow: View {
+
+第 47 页
+------------------------------------------------------------
+ 142      let title: String
+ 143      let limit: String
+ 144      let isPro: Bool
+ 145  
+ 146      var body: some View {
+ 147          HStack {
+ 148              Text(title)
+ 149                  .font(.subheadline)
+ 150              Spacer()
+ 151              Text(limit)
+ 152                  .font(.caption)
+ 153                  .foregroundStyle(isPro ? .green : .secondary)
+ 154              Image(systemName: isPro ? "checkmark.circle.fill" : "xmark.circle")
+ 155                  .foregroundStyle(isPro ? .green : .red)
+ 156                  .font(.caption)
+ 157          }
+ 158      }
+ 159  }
+ 160  
+ 161  // MARK: - 订阅选项卡片
+ 162  
+ 163  struct SubscriptionOptionsCard: View {
+ 164      @StateObject private var subscriptionService = SubscriptionService.shared
+ 165      @Binding var isPurchasing: Bool
+ 166  
+ 167      var body: some View {
+ 168          VStack(alignment: .leading, spacing: 12) {
+ 169              Text("订阅会员版")
+ 170                  .font(.headline)
+ 171                  .foregroundStyle(.secondary)
+ 172  
+ 173              Text("解锁全部功能")
+ 174                  .font(.caption)
+ 175                  .foregroundStyle(.green)
+ 176  
+ 177              VStack(spacing: 12) {
+ 178                  SubscriptionOptionRow(
+ 179                      tier: .monthly,
+ 180                      isPurchasing: $isPurchasing
+ 181                  )
+ 182  
+ 183                  SubscriptionOptionRow(
+ 184                      tier: .quarterly,
+ 185                      isPurchasing: $isPurchasing
+ 186                  )
+ 187                  .overlay(
+ 188                      RoundedRectangle(cornerRadius: 8)
+ 189                          .stroke(Color.orange, lineWidth: 2)
+ 190                  )
+ 191  
+
+第 48 页
+------------------------------------------------------------
+ 192                  SubscriptionOptionRow(
+ 193                      tier: .yearly,
+ 194                      isPurchasing: $isPurchasing
+ 195                  )
+ 196                  .overlay(
+ 197                      RoundedRectangle(cornerRadius: 8)
+ 198                          .stroke(Color.orange, lineWidth: 2)
+ 199                  )
+ 200              }
+ 201          }
+ 202          .padding()
+ 203          .background(Color(.systemBackground))
+ 204          .cornerRadius(12)
+ 205          .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+ 206      }
+ 207  }
+ 208  
+ 209  struct SubscriptionOptionRow: View {
+ 210      let tier: SubscriptionTier
+ 211      @Binding var isPurchasing: Bool
+ 212  
+ 213      @StateObject private var subscriptionService = SubscriptionService.shared
+ 214  
+ 215      var body: some View {
+ 216          Button(action: { purchase() }) {
+ 217              HStack {
+ 218                  VStack(alignment: .leading, spacing: 4) {
+ 219                      HStack(spacing: 8) {
+ 220                          Text(tier.rawValue)
+ 221                              .font(.headline)
+ 222  
+ 223                          if let discount = tier.discount {
+ 224                              Text(discount)
+ 225                                  .font(.caption)
+ 226                                  .fontWeight(.bold)
+ 227                                  .padding(.horizontal, 6)
+ 228                                  .padding(.vertical, 2)
+ 229                                  .background(Color.orange.opacity(0.15))
+ 230                                  .foregroundStyle(.orange)
+ 231                                  .cornerRadius(4)
+ 232                          }
+ 233                      }
+ 234  
+ 235                      if let monthly = tier.monthlyEquivalent {
+ 236                          Text("相当于\(monthly)")
+ 237                              .font(.caption)
+ 238                              .foregroundStyle(.secondary)
+ 239                      }
+ 240                  }
+ 241  
+
+第 49 页
+------------------------------------------------------------
+ 242                  Spacer()
+ 243  
+ 244                  Text(tier.price)
+ 245                      .font(.title3)
+ 246                      .fontWeight(.bold)
+ 247                      .foregroundStyle(Color.accentColor)
+ 248              }
+ 249              .padding(12)
+ 250              .background(Color(.secondarySystemBackground))
+ 251              .cornerRadius(8)
+ 252          }
+ 253          .buttonStyle(.plain)
+ 254      }
+ 255  
+ 256      private func purchase() {
+ 257          Task {
+ 258              isPurchasing = true
+ 259              do {
+ 260                  let success = try await subscriptionService.purchase(tier)
+ 261                  if !success && subscriptionService.lastError != nil {
+ 262                      // 显示错误（用户取消不显示）
+ 263                  }
+ 264              } catch {
+ 265                  print("Purchase failed: \(error)")
+ 266              }
+ 267              isPurchasing = false
+ 268          }
+ 269      }
+ 270  }
+ 271  
+ 272  // MARK: - 开发测试区域
+ 273  
+ 274  struct DevTestSection: View {
+ 275      @StateObject private var subscriptionService = SubscriptionService.shared
+ 276  
+ 277      var body: some View {
+ 278          VStack(alignment: .leading, spacing: 12) {
+ 279              Text("🧪 开发测试")
+ 280                  .font(.headline)
+ 281                  .foregroundStyle(.secondary)
+ 282  
+ 283              Text("StoreKit 产品未配置，点击下方按钮模拟订阅成功")
+ 284                  .font(.caption)
+ 285                  .foregroundStyle(.orange)
+ 286  
+ 287              HStack(spacing: 12) {
+ 288                  devTestButton(tier: .monthly)
+ 289                  devTestButton(tier: .quarterly)
+ 290                  devTestButton(tier: .yearly)
+ 291              }
+
+第 50 页
+------------------------------------------------------------
+ 292          }
+ 293          .padding()
+ 294          .background(Color(.systemBackground))
+ 295          .cornerRadius(12)
+ 296          .overlay(
+ 297              RoundedRectangle(cornerRadius: 12)
+ 298                  .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+ 299          )
+ 300      }
+ 301  
+ 302      private func devTestButton(tier: SubscriptionTier) -> some View {
+ 303          Button {
+ 304              subscriptionService.simulateSubscription(tier)
+ 305          } label: {
+ 306              Text(tier.rawValue)
+ 307                  .font(.caption)
+ 308                  .padding(.horizontal, 12)
+ 309                  .padding(.vertical, 8)
+ 310                  .background(Color.orange.opacity(0.1))
+ 311                  .foregroundStyle(.orange)
+ 312                  .cornerRadius(8)
+ 313          }
+ 314      }
+ 315  }
+ 316  
+ 317  // MARK: - 恢复购买按钮
+ 318  
+ 319  struct RestorePurchaseButton: View {
+ 320      var body: some View {
+ 321          Button(action: {
+ 322              Task {
+ 323                  try? await SubscriptionService.shared.restorePurchases()
+ 324              }
+ 325          }) {
+ 326              Text("恢复购买")
+ 327                  .font(.subheadline)
+ 328                  .foregroundStyle(.secondary)
+ 329          }
+ 330      }
+ 331  }
+ 332  
+ 333  #Preview {
+ 334      NavigationStack {
+ 335          SubscriptionView()
+ 336      }
+ 337  }
+ 338  
+   1  //
+   2  //  WatchlistView.swift
+   3  //  DividendTreasure
+
+第 51 页
+------------------------------------------------------------
+   4  //
+   5  //  我的收藏页面 - 收藏股票并设置股息率价格提醒
+   6  //
+   7  
+   8  import SwiftUI
+   9  import SwiftData
+  10  
+  11  struct WatchlistView: View {
+  12      @Environment(\.modelContext) private var modelContext
+  13      @Query(sort: \WatchlistItem.createdAt, order: .reverse) private var watchlistItems: [WatchlistItem]
+  14      @State private var showingAddItem = false
+  15      @State private var showingNotificationSettings = false
+  16  
+  17      var body: some View {
+  18          NavigationStack {
+  19              Group {
+  20                  if watchlistItems.isEmpty {
+  21                      ContentUnavailableView(
+  22                          "暂无收藏",
+  23                          systemImage: "star",
+  24                          description: Text("点击右上角 + 添加收藏股票")
+  25                      )
+  26                  } else {
+  27                      List {
+  28                          ForEach(watchlistItems) { item in
+  29                              NavigationLink(destination: WatchlistDetailView(item: item)) {
+  30                                  WatchlistItemRow(item: item)
+  31                              }
+  32                          }
+  33                          .onDelete(perform: deleteItems)
+  34                      }
+  35                  }
+  36              }
+  37              .navigationTitle("我的收藏")
+  38              .toolbar {
+  39                  ToolbarItem(placement: .primaryAction) {
+  40                      Button(action: { showingAddItem = true }) {
+  41                          Image(systemName: "plus")
+  42                      }
+  43                  }
+  44              }
+  45              .sheet(isPresented: $showingAddItem) {
+  46                  WatchlistFormView()
+  47              }
+  48              .sheet(isPresented: $showingNotificationSettings) {
+  49                  NotificationSettingsView()
+  50              }
+  51          }
+  52          .onAppear {
+  53              // 检查通知权限
+
+第 52 页
+------------------------------------------------------------
+  54              NotificationService.shared.checkAuthorization()
+  55          }
+  56      }
+  57  
+  58      private func deleteItems(offsets: IndexSet) {
+  59          withAnimation {
+  60              for index in offsets {
+  61                  modelContext.delete(watchlistItems[index])
+  62              }
+  63          }
+  64      }
+  65  }
+  66  
+  67  // MARK: - 收藏行视图
+  68  
+  69  struct WatchlistItemRow: View {
+  70      let item: WatchlistItem
+  71  
+  72      var body: some View {
+  73          VStack(alignment: .leading, spacing: 8) {
+  74              // 标题行
+  75              HStack {
+  76                  VStack(alignment: .leading, spacing: 2) {
+  77                      Text(item.symbol)
+  78                          .font(.headline)
+  79                      Text(item.name)
+  80                          .font(.caption)
+  81                          .foregroundStyle(.secondary)
+  82                  }
+  83  
+  84                  Spacer()
+  85  
+  86                  // 提醒状态
+  87                  if item.alertEnabled {
+  88                      Image(systemName: "bell.fill")
+  89                          .foregroundStyle(.orange)
+  90                          .font(.caption)
+  91                  }
+  92              }
+  93  
+  94              // 价格和股息率信息
+  95              HStack(spacing: 16) {
+  96                  // 当前价格
+  97                  VStack(alignment: .leading, spacing: 2) {
+  98                      Text("现价")
+  99                          .font(.caption2)
+ 100                          .foregroundStyle(.tertiary)
+ 101                      Text(CurrencyFormatter.formatPrice(item.currentPrice))
+ 102                          .font(.subheadline)
+ 103                          .fontWeight(.medium)
+
+第 53 页
+------------------------------------------------------------
+ 104                  }
+ 105  
+ 106                  // 当前股息率
+ 107                  VStack(alignment: .leading, spacing: 2) {
+ 108                      Text("股息率")
+ 109                          .font(.caption2)
+ 110                          .foregroundStyle(.tertiary)
+ 111                      Text(PercentFormatter.format(item.currentYield))
+ 112                          .font(.subheadline)
+ 113                          .fontWeight(.medium)
+ 114                          .foregroundStyle(.orange)
+ 115                  }
+ 116  
+ 117                  Spacer()
+ 118  
+ 119                  // 目标价格
+ 120                  VStack(alignment: .trailing, spacing: 2) {
+ 121                      Text("目标买入")
+ 122                          .font(.caption2)
+ 123                          .foregroundStyle(.tertiary)
+ 124                      Text(CurrencyFormatter.formatPrice(item.targetBuyPrice))
+ 125                          .font(.subheadline)
+ 126                          .foregroundStyle(.green)
+ 127                  }
+ 128              }
+ 129  
+ 130              // 提醒状态指示
+ 131              if item.alertEnabled {
+ 132                  HStack(spacing: 8) {
+ 133                      if item.shouldAlertBuy {
+ 134                          Text("建议买入")
+ 135                              .font(.caption2)
+ 136                              .padding(4)
+ 137                              .background(.green.opacity(0.2))
+ 138                              .foregroundStyle(.green)
+ 139                              .cornerRadius(4)
+ 140                      }
+ 141  
+ 142                      if item.shouldAlertSell {
+ 143                          Text("建议卖出")
+ 144                              .font(.caption2)
+ 145                              .padding(4)
+ 146                              .background(.red.opacity(0.2))
+ 147                              .foregroundStyle(.red)
+ 148                              .cornerRadius(4)
+ 149                      }
+ 150  
+ 151                      Spacer()
+ 152                  }
+ 153              }
+
+第 54 页
+------------------------------------------------------------
+ 154          }
+ 155          .padding(.vertical, 4)
+ 156      }
+ 157  }
+ 158  
+ 159  // MARK: - 收藏表单视图
+ 160  
+ 161  struct WatchlistFormView: View {
+ 162      @Environment(\.modelContext) private var modelContext
+ 163      @Environment(\.dismiss) private var dismiss
+ 164  
+ 165      @State private var symbol = ""
+ 166      @State private var name = ""
+ 167      @State private var market = "A股"
+ 168      @State private var currentPrice = ""
+ 169      @State private var annualDividendPerShare = ""
+ 170      @State private var targetBuyYield = ""
+ 171      @State private var targetSellYield = ""
+ 172      @State private var alertEnabled = false
+ 173      @State private var note = ""
+ 174  
+ 175      @State private var showStockSearch = false
+ 176  
+ 177      var body: some View {
+ 178          NavigationStack {
+ 179              Form {
+ 180                  // 基本信息
+ 181                  Section("基本信息") {
+ 182                      Button(action: { showStockSearch = true }) {
+ 183                          HStack {
+ 184                              Label("搜索股票", systemImage: "magnifyingglass")
+ 185                                  .foregroundStyle(.blue)
+ 186                              Spacer()
+ 187                              Image(systemName: "chevron.right")
+ 188                                  .font(.caption)
+ 189                                  .foregroundStyle(.secondary)
+ 190                          }
+ 191                      }
+ 192  
+ 193                      TextField("股票代码", text: $symbol)
+ 194                      TextField("股票名称", text: $name)
+ 195  
+ 196                      Picker("市场", selection: $market) {
+ 197                          Text("A股").tag("A股")
+ 198                          Text("港股").tag("港股")
+ 199                          Text("美股").tag("美股")
+ 200                      }
+ 201                  }
+ 202  
+ 203                  // 价格和股息信息
+
+第 55 页
+------------------------------------------------------------
+ 204                  Section("价格和股息") {
+ 205                      TextField("当前价格", text: $currentPrice)
+ 206                          .keyboardType(.decimalPad)
+ 207  
+ 208                      TextField("年度每股股息", text: $annualDividendPerShare)
+ 209                          .keyboardType(.decimalPad)
+ 210                  }
+ 211  
+ 212                  // 目标股息率
+ 213                  Section("目标股息率（小数形式，如0.06表示6%）") {
+ 214                      TextField("目标买入股息率", text: $targetBuyYield)
+ 215                          .keyboardType(.decimalPad)
+ 216  
+ 217                      TextField("目标卖出股息率", text: $targetSellYield)
+ 218                          .keyboardType(.decimalPad)
+ 219  
+ 220                      Toggle("启用提醒", isOn: $alertEnabled)
+ 221                  }
+ 222  
+ 223                  // 备注
+ 224                  Section("备注") {
+ 225                      TextEditor(text: $note)
+ 226                          .frame(height: 60)
+ 227                  }
+ 228  
+ 229                  // 计算预览
+ 230                  if let price = Double(currentPrice),
+ 231                     let dividend = Double(annualDividendPerShare),
+ 232                     price > 0 {
+ 233                      Section("计算预览") {
+ 234                          HStack {
+ 235                              Text("当前股息率")
+ 236                              Spacer()
+ 237                              Text(PercentFormatter.format(dividend / price))
+ 238                                  .foregroundStyle(.orange)
+ 239                          }
+ 240  
+ 241                          if let buyYield = Double(targetBuyYield), buyYield > 0 {
+ 242                              HStack {
+ 243                                  Text("目标买入价")
+ 244                                  Spacer()
+ 245                                  Text(CurrencyFormatter.formatPrice(dividend / buyYield))
+ 246                                      .foregroundStyle(.green)
+ 247                              }
+ 248                          }
+ 249  
+ 250                          if let sellYield = Double(targetSellYield), sellYield > 0 {
+ 251                              HStack {
+ 252                                  Text("目标卖出价")
+ 253                                  Spacer()
+
+第 56 页
+------------------------------------------------------------
+ 254                                  Text(CurrencyFormatter.formatPrice(dividend / sellYield))
+ 255                                      .foregroundStyle(.red)
+ 256                              }
+ 257                          }
+ 258                      }
+ 259                  }
+ 260              }
+ 261              .navigationTitle("添加收藏")
+ 262              .navigationBarTitleDisplayMode(.inline)
+ 263              .toolbar {
+ 264                  ToolbarItem(placement: .cancellationAction) {
+ 265                      Button("取消") { dismiss() }
+ 266                  }
+ 267                  ToolbarItem(placement: .confirmationAction) {
+ 268                      Button("保存") {
+ 269                          saveWatchlistItem()
+ 270                      }
+ 271                      .disabled(!isValid)
+ 272                  }
+ 273              }
+ 274              .sheet(isPresented: $showStockSearch) {
+ 275                  StockSearchView { result, stockData in
+ 276                      symbol = result.symbol
+ 277                      name = result.name
+ 278                      market = result.market
+ 279  
+ 280                      if let data = stockData {
+ 281                          if data.currentPrice > 0 {
+ 282                              currentPrice = String(format: "%.2f", data.currentPrice)
+ 283                          }
+ 284                          if data.latestDividend > 0 {
+ 285                              annualDividendPerShare = String(format: "%.4f", data.latestDividend)
+ 286                          }
+ 287                      }
+ 288                  }
+ 289              }
+ 290          }
+ 291      }
+ 292  
+ 293      private var isValid: Bool {
+ 294          !symbol.isEmpty && !name.isEmpty
+ 295      }
+ 296  
+ 297      private func saveWatchlistItem() {
+ 298          let item = WatchlistItem(
+ 299              symbol: symbol,
+ 300              name: name,
+ 301              market: market,
+ 302              currentPrice: Double(currentPrice) ?? 0,
+ 303              annualDividendPerShare: Double(annualDividendPerShare) ?? 0,
+
+第 57 页
+------------------------------------------------------------
+ 304              targetBuyYield: Double(targetBuyYield) ?? 0,
+ 305              targetSellYield: Double(targetSellYield) ?? 0,
+ 306              alertEnabled: alertEnabled,
+ 307              note: note
+ 308          )
+ 309  
+ 310          modelContext.insert(item)
+ 311          dismiss()
+ 312      }
+ 313  }
+ 314  
+ 315  // MARK: - 收藏详情视图
+ 316  
+ 317  struct WatchlistDetailView: View {
+ 318      @Environment(\.modelContext) private var modelContext
+ 319      @Environment(\.dismiss) private var dismiss
+ 320  
+ 321      @Bindable var item: WatchlistItem
+ 322  
+ 323      @State private var isEditing = false
+ 324      @State private var showingDeleteConfirm = false
+ 325  
+ 326      var body: some View {
+ 327          List {
+ 328              // 基本信息
+ 329              Section("基本信息") {
+ 330                  LabeledContent("代码", value: item.symbol)
+ 331                  LabeledContent("名称", value: item.name)
+ 332                  LabeledContent("市场", value: item.market)
+ 333              }
+ 334  
+ 335              // 价格信息
+ 336              Section("价格信息") {
+ 337                  LabeledContent("当前价格") {
+ 338                      Text(CurrencyFormatter.formatPrice(item.currentPrice))
+ 339                  }
+ 340  
+ 341                  LabeledContent("年度每股股息") {
+ 342                      Text(String(format: "%.4f", item.annualDividendPerShare))
+ 343                  }
+ 344  
+ 345                  LabeledContent("当前股息率") {
+ 346                      Text(PercentFormatter.format(item.currentYield))
+ 347                          .foregroundStyle(.orange)
+ 348                          .fontWeight(.semibold)
+ 349                  }
+ 350              }
+ 351  
+ 352              // 目标价格
+ 353              Section("目标价格") {
+
+第 58 页
+------------------------------------------------------------
+ 354                  if item.targetBuyYield > 0 {
+ 355                      LabeledContent("目标买入股息率") {
+ 356                          Text(PercentFormatter.format(item.targetBuyYield))
+ 357                      }
+ 358  
+ 359                      LabeledContent("目标买入价") {
+ 360                          Text(CurrencyFormatter.formatPrice(item.targetBuyPrice))
+ 361                              .foregroundStyle(.green)
+ 362                              .fontWeight(.semibold)
+ 363                      }
+ 364                  }
+ 365  
+ 366                  if item.targetSellYield > 0 {
+ 367                      LabeledContent("目标卖出股息率") {
+ 368                          Text(PercentFormatter.format(item.targetSellYield))
+ 369                      }
+ 370  
+ 371                      LabeledContent("目标卖出价") {
+ 372                          Text(CurrencyFormatter.formatPrice(item.targetSellPrice))
+ 373                              .foregroundStyle(.red)
+ 374                              .fontWeight(.semibold)
+ 375                      }
+ 376                  }
+ 377              }
+ 378  
+ 379              // 提醒设置
+ 380              Section("提醒设置") {
+ 381                  Toggle("启用提醒", isOn: $item.alertEnabled)
+ 382  
+ 383                  if item.alertEnabled {
+ 384                      if item.shouldAlertBuy {
+ 385                          HStack {
+ 386                              Image(systemName: "checkmark.circle.fill")
+ 387                                  .foregroundStyle(.green)
+ 388                              Text("已达到买入条件")
+ 389                                  .foregroundStyle(.green)
+ 390                          }
+ 391                      }
+ 392  
+ 393                      if item.shouldAlertSell {
+ 394                          HStack {
+ 395                              Image(systemName: "checkmark.circle.fill")
+ 396                                  .foregroundStyle(.red)
+ 397                              Text("已达到卖出条件")
+ 398                                  .foregroundStyle(.red)
+ 399                          }
+ 400                      }
+ 401                  }
+ 402              }
+ 403  
+
+第 59 页
+------------------------------------------------------------
+ 404              // 备注
+ 405              if !item.note.isEmpty {
+ 406                  Section("备注") {
+ 407                      Text(item.note)
+ 408                  }
+ 409              }
+ 410  
+ 411              // 操作
+ 412              Section {
+ 413                  Button(role: .destructive, action: { showingDeleteConfirm = true }) {
+ 414                      HStack {
+ 415                          Spacer()
+ 416                          Text("删除收藏")
+ 417                          Spacer()
+ 418                      }
+ 419                  }
+ 420              }
+ 421          }
+ 422          .navigationTitle(item.name)
+ 423          .navigationBarTitleDisplayMode(.inline)
+ 424          .alert("确认删除", isPresented: $showingDeleteConfirm) {
+ 425              Button("取消", role: .cancel) { }
+ 426              Button("删除", role: .destructive) {
+ 427                  modelContext.delete(item)
+ 428                  dismiss()
+ 429              }
+ 430          } message: {
+ 431              Text("确定要删除收藏 \(item.name) 吗？")
+ 432          }
+ 433          .onChange(of: item.currentPrice) { _, _ in
+ 434              checkAndSendAlert()
+ 435          }
+ 436      }
+ 437  
+ 438      private func checkAndSendAlert() {
+ 439          guard item.alertEnabled else { return }
+ 440  
+ 441          if item.shouldAlertBuy {
+ 442              NotificationService.shared.sendPriceAlert(
+ 443                  for: item.symbol,
+ 444                  name: item.name,
+ 445                  currentPrice: item.currentPrice,
+ 446                  targetPrice: item.targetBuyPrice,
+ 447                  isBuy: true
+ 448              )
+ 449          }
+ 450  
+ 451          if item.shouldAlertSell {
+ 452              NotificationService.shared.sendPriceAlert(
+ 453                  for: item.symbol,
+
+第 60 页
+------------------------------------------------------------
+ 454                  name: item.name,
+ 455                  currentPrice: item.currentPrice,
+ 456                  targetPrice: item.targetSellPrice,
+ 457                  isBuy: false
+ 458              )
+ 459          }
+ 460      }
+ 461  }
+ 462  
+ 463  // MARK: - 通知设置视图
+ 464  
+ 465  struct NotificationSettingsView: View {
+ 466      @Environment(\.dismiss) private var dismiss
+ 467  
+ 468      var body: some View {
+ 469          NavigationStack {
+ 470              Form {
+ 471                  Section {
+ 472                      if NotificationService.shared.isAuthorized {
+ 473                          Label("通知权限已开启", systemImage: "checkmark.circle.fill")
+ 474                              .foregroundStyle(.green)
+ 475                      } else {
+ 476                          Button(action: {
+ 477                              NotificationService.shared.requestAuthorization()
+ 478                          }) {
+ 479                              Label("开启通知权限", systemImage: "bell.badge")
+ 480                          }
+ 481                      }
+ 482                  } header: {
+ 483                      Text("通知权限")
+ 484                  } footer: {
+ 485                      Text("开启通知后，当股息率达到目标时会收到提醒")
+ 486                  }
+ 487              }
+ 488              .navigationTitle("通知设置")
+ 489              .navigationBarTitleDisplayMode(.inline)
+ 490              .toolbar {
+ 491                  ToolbarItem(placement: .confirmationAction) {
+ 492                      Button("完成") { dismiss() }
+ 493                  }
+ 494              }
+ 495          }
+ 496      }
+ 497  }
+ 498  
+ 499  #Preview {
+ 500      WatchlistView()
+ 501          .modelContainer(for: WatchlistItem.self, inMemory: true)
+ 502  }
+ 503  
+
