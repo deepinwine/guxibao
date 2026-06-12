@@ -432,3 +432,37 @@ extension StockDataService {
         }
     }
 }
+
+// MARK: - 批量获取
+
+extension StockDataService {
+    /// 批量获取多只股票的实时价格
+    /// - Parameter symbols: 股票代码数组，格式为 [(symbol: String, marketCode: String)]
+    /// - Returns: 字典，key为symbol，value为价格（获取失败时为nil）
+    /// - Note: 并发获取所有股票，单只失败不影响其他。适用于持仓数量较少（<20）的场景。
+    func fetchBatchPrices(
+        symbols: [(symbol: String, marketCode: String)]
+    ) async -> [String: Double?] {
+        // 并发获取所有股票价格
+        var results: [String: Double?] = [:]
+
+        await withTaskGroup(of: (String, Double?).self) { group in
+            for (symbol, marketCode) in symbols {
+                group.addTask {
+                    do {
+                        let stockData = try await self.fetchStockData(symbol: symbol, marketCode: marketCode)
+                        return (symbol, stockData.currentPrice)
+                    } catch {
+                        return (symbol, nil)
+                    }
+                }
+            }
+
+            for await (symbol, price) in group {
+                results[symbol] = price
+            }
+        }
+
+        return results
+    }
+}
