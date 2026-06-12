@@ -92,8 +92,8 @@ class ImportParser {
 
     /// 提取股票名称（中文）
     private func extractStockName(from text: String) -> String? {
-        // 匹配2-10个中文字符
-        let pattern = "[\\u4e00-\\u9fa5]{2,10}"
+        // 匹配2-6个中文字符（股票名称通常是2-6个字）
+        let pattern = "[\\u4e00-\\u9fa5]{2,6}"
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let range = Range(match.range, in: text) else {
@@ -102,12 +102,22 @@ class ImportParser {
 
         let name = String(text[range])
 
-        // 过滤常见的非股票名称
+        // 过滤常见的非股票名称（扩大黑名单）
         let blackList = ["持仓", "市值", "成本", "盈亏", "可用", "冻结", "总计", "合计",
                         "股票", "代码", "名称", "数量", "价格", "成本价", "现价", "市值",
-                        "证券", "账户", "资金", "日期", "时间", "账号"]
+                        "证券", "账户", "资金", "日期", "时间", "账号", "今日", "昨日",
+                        "买入", "卖出", "交易", "委托", "成交", "撤单", "查询", "刷新",
+                        "详情", "更多", "返回", "确认", "取消", "备注", "说明", "提示",
+                        "风险", "提示", "投资", "理财", "收益", "持有", "卖出", "买入",
+                        "今日盈", "昨日盈", "持仓盈", "浮动盈", "实现盈", "当日盈",
+                        "手续费", "印花税", "过户费", "佣金", "净佣金", "结算费"]
 
         if blackList.contains(name) {
+            return nil
+        }
+
+        // 过滤纯数字内容
+        if name.allSatisfy({ $0.isNumber }) {
             return nil
         }
 
@@ -130,10 +140,44 @@ class ImportParser {
     private func extractAdditionalInfo(from texts: [String], startingAt index: Int, into holding: inout ParsedHolding) {
         let searchRange = max(0, index - 3)...min(texts.count - 1, index + 5)
 
+        // 先尝试提取明确标记的字段
         for i in searchRange {
             let text = texts[i]
 
-            // 提取数量
+            // 如果文本包含"成本"关键词，优先提取成本价
+            if text.contains("成本") || text.contains("均价") || text.contains("买入价") {
+                if holding.averageCost == nil {
+                    holding.averageCost = extractPrice(from: text)
+                }
+            }
+
+            // 如果文本包含"现价"或"最新价"，提取当前价格
+            if text.contains("现价") || text.contains("最新价") || text.contains("当前价") {
+                if holding.currentPrice == nil {
+                    holding.currentPrice = extractPrice(from: text)
+                }
+            }
+
+            // 如果文本包含"市值"，提取市值
+            if text.contains("市值") || text.contains("持有市值") {
+                if holding.marketValue == nil {
+                    holding.marketValue = extractMarketValue(from: text)
+                }
+            }
+
+            // 如果文本包含"持仓"或"数量"或"股数"，提取数量
+            if text.contains("持仓") || text.contains("数量") || text.contains("股数") || text.contains("持有") {
+                if holding.quantity == nil {
+                    holding.quantity = extractQuantity(from: text)
+                }
+            }
+        }
+
+        // 如果还没有提取到，再尝试从相邻文本中提取
+        for i in searchRange {
+            let text = texts[i]
+
+            // 提取数量（必须满足更严格的条件）
             if holding.quantity == nil {
                 holding.quantity = extractQuantity(from: text)
             }
@@ -142,21 +186,19 @@ class ImportParser {
             if holding.currentPrice == nil {
                 holding.currentPrice = extractPrice(from: text)
             }
-
-            // 提取成本
-            if holding.averageCost == nil {
-                holding.averageCost = extractCost(from: text)
-            }
-
-            // 提取市值
-            if holding.marketValue == nil {
-                holding.marketValue = extractMarketValue(from: text)
-            }
         }
     }
 
-    /// 提取数量（整数，通常 >= 100）
+    /// 提取数量（整数，需要更智能的判断）
     private func extractQuantity(from text: String) -> Double? {
+        // 如果文本包含"市值"、"金额"、"资产"等关键词，跳过
+        let skipKeywords = ["市值", "金额", "资产", "盈亏", "收益", "成本", "价格", "现价", "万", "亿"]
+        for keyword in skipKeywords {
+            if text.contains(keyword) {
+                return nil
+            }
+        }
+
         // 匹配整数
         let pattern = "\\d+"
         guard let regex = try? NSRegularExpression(pattern: pattern),
@@ -168,8 +210,9 @@ class ImportParser {
         let numberStr = String(text[range])
         let number = Double(numberStr) ?? 0
 
-        // 数量通常是整数且 >= 100
-        if number >= 100 && number.truncatingRemainder(dividingBy: 1) == 0 {
+        // 数量通常是整数，范围在 100 ~ 1000000 之间
+        // 市值通常 > 1000000，所以用这个区分
+        if number >= 100 && number < 1000000 && number.truncatingRemainder(dividingBy: 1) == 0 {
             return number
         }
 
