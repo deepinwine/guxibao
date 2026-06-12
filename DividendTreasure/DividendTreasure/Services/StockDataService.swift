@@ -478,16 +478,63 @@ extension StockDataService {
         var request = URLRequest(url: url)
         request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
 
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let dataDict = json["data"] as? [String: Any],
                let priceValue = dataDict["f43"] as? Int {
-                return Double(priceValue) / 1000.0
+                let price = Double(priceValue) / 1000.0
+                print("东方财富获取成功: \(symbol) = \(price)")
+                return price
             }
         } catch {
-            print("获取股价失败: \(symbol) - \(error)")
+            print("东方财富获取失败: \(symbol) - \(error)")
+        }
+
+        // 尝试新浪财经备用API
+        return await fetchPriceFromSina(symbol: symbol, marketCode: marketCode)
+    }
+
+    /// 新浪财经备用API获取股价
+    private func fetchPriceFromSina(symbol: String, marketCode: String) async -> Double? {
+        // A股添加sh/sz前缀
+        let prefix: String
+        if marketCode == "1" {
+            prefix = symbol.hasPrefix("6") ? "sh" : "sz"
+        } else if marketCode == "0" {
+            prefix = "hk"
+        } else {
+            prefix = "gb_"
+        }
+
+        let urlStr = "https://hq.sinajs.cn/list=\(prefix)\(symbol)"
+        guard let url = URL(string: urlStr) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.addValue("https://finance.sina.com.cn/", forHTTPHeaderField: "Referer")
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let responseStr = String(data: data, encoding: .utf8) {
+                // 解析新浪数据格式：var hq_str_sh600036="招商银行,30.50,..."
+                let components = responseStr.components(separatedBy: "\"")
+                if components.count >= 3 {
+                    let dataStr = components[1]
+                    let values = dataStr.components(separatedBy: ",")
+                    if values.count >= 4 {
+                        let name = values[0]
+                        let priceStr = values[3]
+                        if let price = Double(priceStr) {
+                            print("新浪获取成功: \(name) (\(symbol)) = \(price)")
+                            return price
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("新浪获取失败: \(symbol) - \(error)")
         }
         return nil
     }
