@@ -152,7 +152,10 @@ class StockDataService {
         }
 
         var request = URLRequest(url: url)
-        request.addValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
+        request.addValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+        request.addValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
@@ -197,7 +200,10 @@ class StockDataService {
         }
 
         var request = URLRequest(url: url)
-        request.addValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
+        request.addValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+        request.addValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
