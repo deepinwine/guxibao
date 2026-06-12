@@ -134,17 +134,17 @@ struct PortfolioDetailView: View {
         .navigationTitle(portfolio.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // 表格切换按钮
-            ToolbarItem(placement: .secondaryAction) {
-                Button(action: { showTableView.toggle() }) {
-                    Image(systemName: showTableView ? "list.bullet" : "tablecells")
-                }
-            }
-
             // 添加持仓按钮
             ToolbarItem(placement: .primaryAction) {
-                Button(action: { showingAddHolding = true }) {
-                    Image(systemName: "plus")
+                HStack(spacing: 12) {
+                    // 表格切换按钮
+                    Button(action: { showTableView.toggle() }) {
+                        Image(systemName: showTableView ? "list.bullet" : "tablecells")
+                    }
+                    // 添加持仓按钮
+                    Button(action: { showingAddHolding = true }) {
+                        Image(systemName: "plus")
+                    }
                 }
             }
         }
