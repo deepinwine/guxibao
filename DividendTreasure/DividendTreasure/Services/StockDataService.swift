@@ -53,7 +53,7 @@ class StockDataService {
     // MARK: - API配置
 
     /// 东方财富搜索API
-    private let eastMoneySearchURL = "https://searchapi.eastmoney.com/bussiness/web/QuotationLabelSearch"
+    private let eastMoneySearchURL = "https://searchapi.eastmoney.com/api/suggest/get"
 
     /// 东方财富股票详情API
     private let eastMoneyStockURL = "https://push2.eastmoney.com/api/qt/stock/get"
@@ -80,7 +80,8 @@ class StockDataService {
             return
         }
 
-        let urlStr = "\(eastMoneySearchURL)?keyword=\(keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)&type=stock&pi=1&ps=30"
+        // 使用 suggest API，返回 JSONP 格式
+        let urlStr = "\(eastMoneySearchURL)?cb=&input=\(keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)&type=14"
 
         guard let url = URL(string: urlStr) else {
             completion(.failure(.invalidSymbol))
@@ -88,8 +89,8 @@ class StockDataService {
         }
 
         var request = URLRequest(url: url)
-        request.addValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
-        request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
@@ -102,7 +103,7 @@ class StockDataService {
                 return
             }
 
-            // 解析搜索结果
+            // 解析搜索结果（JSONP格式）
             if let result = self.parseEastMoneySearchResult(data) {
                 self.searchCache[keyword] = result
                 completion(.success(result))
@@ -268,17 +269,32 @@ class StockDataService {
 
     // MARK: - 解析方法
 
-    /// 解析东方财富搜索结果
+    /// 解析东方财富搜索结果（JSONP格式）
     private func parseEastMoneySearchResult(_ data: Data) -> [StockSearchResult]? {
+        guard let responseStr = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        // JSONP 格式: ({"QuotationCodeTable":{"Data":[...]}})
+        // 提取括号内的 JSON
+        let startIndex = responseStr.firstIndex(of: "(") ?? responseStr.startIndex
+        let endIndex = responseStr.lastIndex(of: ")") ?? responseStr.endIndex
+        let jsonStr = String(responseStr[responseStr.index(after: startIndex)..<endIndex])
+
+        guard let jsonData = jsonStr.data(using: .utf8) else {
+            return nil
+        }
+
         do {
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let dataDict = json["Data"] as? [[String: Any]] else {
+            guard let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  let quotationTable = json["QuotationCodeTable"] as? [String: Any],
+                  let dataArray = quotationTable["Data"] as? [[String: Any]] else {
                 return nil
             }
 
             var results: [StockSearchResult] = []
 
-            for item in dataDict {
+            for item in dataArray {
                 guard let code = item["Code"] as? String,
                       let name = item["Name"] as? String else {
                     continue
@@ -306,6 +322,7 @@ class StockDataService {
 
             return results
         } catch {
+            print("解析搜索结果失败: \(error)")
             return nil
         }
     }
