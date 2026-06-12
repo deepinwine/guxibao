@@ -145,7 +145,8 @@ class StockDataService {
 
         // 使用东方财富API
         let secid = "\(marketCode).\(symbol)"
-        let urlStr = "\(eastMoneyStockURL)?secid=\(secid)&fields=f57,f58,f43,f169,f170"
+        // f43: 价格, f58: 名称, f162: 股息率, f173: 每股股息
+        let urlStr = "\(eastMoneyStockURL)?secid=\(secid)&fields=f43,f58,f162,f173"
 
         guard let url = URL(string: urlStr) else {
             completion(.failure(.invalidSymbol))
@@ -172,16 +173,8 @@ class StockDataService {
 
             // 解析股票数据
             if let stockData = self.parseEastMoneyStockData(data, symbol: symbol, marketCode: marketCode) {
-                // 获取分红数据
-                self.fetchDividendData(symbol: symbol, marketCode: marketCode) { dividendResult in
-                    if case .success(let dividend) = dividendResult {
-                        stockData.latestDividend = dividend.dividendPerShare
-                        stockData.dividendDate = dividend.date
-                        stockData.dividendYield = stockData.calculateRealYield()
-                    }
-                    self.stockCache[cacheKey] = stockData
-                    completion(.success(stockData))
-                }
+                self.stockCache[cacheKey] = stockData
+                completion(.success(stockData))
             } else {
                 // 尝试备用API
                 self.fetchFromSinaFinance(symbol: symbol, marketCode: marketCode, completion: completion)
@@ -335,10 +328,19 @@ class StockDataService {
                 return nil
             }
 
-            // f57: 代码, f58: 名称, f43: 价格, f169: 股息率
+            // f58: 名称
             let name = dataDict["f58"] as? String ?? ""
-            let currentPrice = (dataDict["f43"] as? Double ?? 0) / 1000.0 // 需要除以1000
-            let yieldData = (dataDict["f169"] as? Double ?? 0) / 100.0 // 百分比
+
+            // f43: 价格（整数，需除以1000）
+            let priceInt = dataDict["f43"] as? Int ?? 0
+            let currentPrice = Double(priceInt) / 1000.0
+
+            // f162: 股息率（整数，需除以100）
+            let yieldInt = dataDict["f162"] as? Int ?? 0
+            let dividendYield = Double(yieldInt) / 100.0
+
+            // f173: 每股股息（浮点数，单位是元）
+            let dividendPerShare = dataDict["f173"] as? Double ?? 0
 
             let market: String
             switch marketCode {
@@ -350,15 +352,21 @@ class StockDataService {
                 market = "美股"
             }
 
-            return StockData(
+            let stockData = StockData(
                 symbol: symbol,
                 name: name,
                 market: market,
                 marketCode: marketCode,
                 currentPrice: currentPrice,
-                dividendYield: yieldData
+                latestDividend: dividendPerShare,
+                dividendYield: dividendYield > 0 ? dividendYield : (dividendPerShare > 0 && currentPrice > 0 ? dividendPerShare / currentPrice : 0)
             )
+
+            print("解析成功: \(name) (\(symbol)) 价格=\(currentPrice) 股息=\(dividendPerShare) 股息率=\(stockData.dividendYield)")
+
+            return stockData
         } catch {
+            print("解析失败: \(error)")
             return nil
         }
     }
@@ -487,8 +495,9 @@ extension StockDataService {
 
     /// 直接获取单只股票价格（简化版）
     private func fetchPriceDirectly(symbol: String, marketCode: String) async -> Double? {
+        // 获取价格、股息率、每股股息
         let secid = "\(marketCode).\(symbol)"
-        let urlStr = "https://push2.eastmoney.com/api/qt/stock/get?secid=\(secid)&fields=f43,f58"
+        let urlStr = "https://push2.eastmoney.com/api/qt/stock/get?secid=\(secid)&fields=f43,f58,f162,f173"
 
         guard let url = URL(string: urlStr) else { return nil }
 
@@ -500,10 +509,20 @@ extension StockDataService {
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let dataDict = json["data"] as? [String: Any],
-               let priceValue = dataDict["f43"] as? Int {
+               let dataDict = json["data"] as? [String: Any] {
+
+                // f43: 当前价格（需要除以1000）
+                let priceValue = dataDict["f43"] as? Int ?? 0
                 let price = Double(priceValue) / 1000.0
-                print("东方财富获取成功: \(symbol) = \(price)")
+
+                // f173: 每股股息（元）
+                let dividendPerShare = dataDict["f173"] as? Double ?? 0
+
+                // f162: 股息率（需要除以100）
+                let yieldValue = dataDict["f162"] as? Int ?? 0
+                let dividendYield = Double(yieldValue) / 100.0
+
+                print("东方财富获取成功: \(symbol) 价格=\(price) 股息=\(dividendPerShare) 股息率=\(dividendYield)%")
                 return price
             }
         } catch {
