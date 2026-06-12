@@ -449,18 +449,14 @@ extension StockDataService {
     func fetchBatchPrices(
         symbols: [(symbol: String, marketCode: String)]
     ) async -> [String: Double?] {
-        // 并发获取所有股票价格
         var results: [String: Double?] = [:]
 
         await withTaskGroup(of: (String, Double?).self) { group in
             for (symbol, marketCode) in symbols {
                 group.addTask {
-                    do {
-                        let stockData = try await self.fetchStockData(symbol: symbol, marketCode: marketCode)
-                        return (symbol, stockData.currentPrice)
-                    } catch {
-                        return (symbol, nil)
-                    }
+                    // 直接请求东方财富API获取价格
+                    let price = await self.fetchPriceDirectly(symbol: symbol, marketCode: marketCode)
+                    return (symbol, price)
                 }
             }
 
@@ -470,5 +466,29 @@ extension StockDataService {
         }
 
         return results
+    }
+
+    /// 直接获取单只股票价格（简化版）
+    private func fetchPriceDirectly(symbol: String, marketCode: String) async -> Double? {
+        let secid = "\(marketCode).\(symbol)"
+        let urlStr = "https://push2.eastmoney.com/api/qt/stock/get?secid=\(secid)&fields=f43,f58"
+
+        guard let url = URL(string: urlStr) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.addValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let dataDict = json["data"] as? [String: Any],
+               let priceValue = dataDict["f43"] as? Int {
+                return Double(priceValue) / 1000.0
+            }
+        } catch {
+            print("获取股价失败: \(symbol) - \(error)")
+        }
+        return nil
     }
 }
