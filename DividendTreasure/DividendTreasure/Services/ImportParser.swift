@@ -138,53 +138,111 @@ class ImportParser {
 
     /// 从后续文本中提取附加信息
     private func extractAdditionalInfo(from texts: [String], startingAt index: Int, into holding: inout ParsedHolding) {
-        let searchRange = max(0, index - 3)...min(texts.count - 1, index + 5)
+        let searchRange = max(0, index - 3)...min(texts.count - 1, index + 8)
 
-        // 先尝试提取明确标记的字段
+        // 收集搜索范围内的所有数字信息
+        var foundCost: Double?
+        var foundPrice: Double?
+        var foundQuantity: Double?
+        var foundMarketValue: Double?
+
+        // 第一步：提取有明确标记的字段
         for i in searchRange {
             let text = texts[i]
 
-            // 如果文本包含"成本"关键词，优先提取成本价
+            // 成本价
             if text.contains("成本") || text.contains("均价") || text.contains("买入价") {
-                if holding.averageCost == nil {
-                    holding.averageCost = extractPrice(from: text)
-                }
+                if foundCost == nil { foundCost = extractPrice(from: text) }
             }
 
-            // 如果文本包含"现价"或"最新价"，提取当前价格
+            // 当前价格
             if text.contains("现价") || text.contains("最新价") || text.contains("当前价") {
-                if holding.currentPrice == nil {
-                    holding.currentPrice = extractPrice(from: text)
-                }
+                if foundPrice == nil { foundPrice = extractPrice(from: text) }
             }
 
-            // 如果文本包含"市值"，提取市值
+            // 市值
             if text.contains("市值") || text.contains("持有市值") {
-                if holding.marketValue == nil {
-                    holding.marketValue = extractMarketValue(from: text)
+                if foundMarketValue == nil { foundMarketValue = extractMarketValue(from: text) }
+            }
+
+            // 数量（带明确标记的更可靠）
+            if text.contains("持仓量") || text.contains("持有量") || text.contains("股数") || text.contains("可用") {
+                if foundQuantity == nil { foundQuantity = extractQuantity(from: text) }
+            }
+        }
+
+        // 第二步：如果没有明确标记，从相邻的数字推断
+        // 券商截图通常是：名称 代码 现价 持仓数量 成本价 市值
+        // 所以股票名称后面的数字按顺序通常是：现价、数量、成本、市值
+
+        // 收集相邻文本中的数字
+        var nearbyNumbers: [(index: Int, value: Double, type: NumberType)] = []
+
+        enum NumberType {
+            case decimal  // 小数，如 39.34 -> 可能是价格
+            case integer  // 整数，如 6900 -> 可能是数量
+            case largeNumber // 大数，如 372669 -> 可能是市值
+        }
+
+        for i in searchRange {
+            let text = texts[i]
+            // 跳过已识别为名称的文本
+            if let name = holding.name, text.contains(name) { continue }
+            // 跳过包含关键词的文本（已经在上一步处理）
+            if text.contains("市值") || text.contains("成本") || text.contains("现价") || text.contains("最新价") { continue }
+
+            // 尝试提取小数价格
+            if let price = extractPrice(from: text), price > 0.01 && price < 1000 {
+                if foundPrice == nil {
+                    nearbyNumbers.append((i, price, .decimal))
                 }
             }
 
-            // 如果文本包含"持仓"或"数量"或"股数"，提取数量
-            if text.contains("持仓") || text.contains("数量") || text.contains("股数") || text.contains("持有") {
-                if holding.quantity == nil {
-                    holding.quantity = extractQuantity(from: text)
+            // 尝试提取整数
+            if let qty = extractQuantity(from: text) {
+                if foundQuantity == nil {
+                    nearbyNumbers.append((i, qty, .integer))
                 }
             }
         }
 
-        // 如果还没有提取到，再尝试从相邻文本中提取
-        for i in searchRange {
-            let text = texts[i]
+        // 第三步：赋值
+        if foundCost != nil { holding.averageCost = foundCost }
+        if foundPrice != nil { holding.currentPrice = foundPrice }
+        if foundMarketValue != nil { holding.marketValue = foundMarketValue }
+        if foundQuantity != nil { holding.quantity = foundQuantity }
 
-            // 提取数量（必须满足更严格的条件）
-            if holding.quantity == nil {
-                holding.quantity = extractQuantity(from: text)
+        // 如果还没有数量，从相邻数字中取（只取integer类型）
+        if holding.quantity == nil {
+            for item in nearbyNumbers {
+                if item.type == .integer {
+                    holding.quantity = item.value
+                    break
+                }
             }
+        }
 
-            // 提取价格
+        // 如果还没有价格，从相邻数字中取（只取decimal类型）
+        if holding.currentPrice == nil {
+            for item in nearbyNumbers {
+                if item.type == .decimal {
+                    holding.currentPrice = item.value
+                    break
+                }
+            }
+        }
+
+        // 第四步：如果有市值和数量，反推价格
+        if let mv = holding.marketValue, mv > 0, let qty = holding.quantity, qty > 0 {
             if holding.currentPrice == nil {
-                holding.currentPrice = extractPrice(from: text)
+                holding.currentPrice = mv / qty
+            }
+        }
+
+        // 如果有价格和数量，反推市值
+        if let price = holding.currentPrice, price > 0, let qty = holding.quantity, qty > 0 {
+            if holding.marketValue == nil {
+                holding.marketValue = price * qty
             }
         }
     }
@@ -192,7 +250,7 @@ class ImportParser {
     /// 提取数量（整数，需要更智能的判断）
     private func extractQuantity(from text: String) -> Double? {
         // 如果文本包含"市值"、"金额"、"资产"等关键词，跳过
-        let skipKeywords = ["市值", "金额", "资产", "盈亏", "收益", "成本", "价格", "现价", "万", "亿"]
+        let skipKeywords = ["市值", "金额", "资产", "盈亏", "收益", "成本", "价格", "现价", "万", "亿", "合计", "总计"]
         for keyword in skipKeywords {
             if text.contains(keyword) {
                 return nil
@@ -210,12 +268,29 @@ class ImportParser {
         let numberStr = String(text[range])
         let number = Double(numberStr) ?? 0
 
-        // 数量通常是整数，范围在 100 ~ 1000000 之间
-        // 市值通常 > 1000000，所以用这个区分
-        if number >= 100 && number < 1000000 && number.truncatingRemainder(dividingBy: 1) == 0 {
+        // 数量特征判断：
+        // 1. 通常在 100 ~ 500000 范围内（50万股以内）
+        // 2. 通常是100的整数倍（股票交易单位是手，1手=100股）
+        // 3. 如果价格已知，可以用市值反推判断
+
+        // 范围检查
+        guard number >= 100 && number < 500000 else {
+            return nil
+        }
+
+        // 检查是否是100的整数倍（持仓数量通常是100股的整数倍）
+        let remainder = number.truncatingRemainder(dividingBy: 100)
+        if remainder == 0 {
             return number
         }
 
+        // 如果不是100的整数倍，检查是否是10的整数倍（部分券商允许零股）
+        let remainder10 = number.truncatingRemainder(dividingBy: 10)
+        if remainder10 == 0 && number < 100000 {
+            return number
+        }
+
+        // 其他情况不认为是数量，可能是市值
         return nil
     }
 
