@@ -135,7 +135,7 @@ struct AssetOverviewCard: View {
 
                                 Capsule()
                                     .fill(item.getColor().color.gradient)
-                                    .frame(width: max(proxy.size.width * item.percentage, 10))
+                                    .frame(width: industryBarWidth(for: item.percentage, totalWidth: proxy.size.width))
                             }
                         }
                         .frame(height: 8)
@@ -295,6 +295,14 @@ struct AssetOverviewCard: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func industryBarWidth(for percentage: Double, totalWidth: CGFloat) -> CGFloat {
+        guard percentage > 0 else {
+            return 0
+        }
+
+        return min(max(totalWidth * percentage, 10), totalWidth)
     }
 }
 

@@ -30,16 +30,39 @@ struct DividendTreasureTests {
     @Test
     func assetInsightOverviewIncludesMarketAndAssetTypeSummaries() {
         let holdings = [
-            Holding(symbol: "600036", name: "招商银行", market: "A股", assetType: "股票", industry: "银行", quantity: 1000, averageCost: 30, currentPrice: 40),
-            Holding(symbol: "510300", name: "沪深300ETF", market: "A股", assetType: "ETF", industry: "其他", quantity: 100, averageCost: 4, currentPrice: 4.2),
-            Holding(symbol: "00700", name: "腾讯控股", market: "港股", assetType: "股票", industry: "科技", quantity: 100, averageCost: 300, currentPrice: 380)
+            Holding(symbol: "600036", name: "招商银行", market: "A股", assetType: "股票", industry: "银行", quantity: 1000, averageCost: 30, currentPrice: 40, annualDividendPerShare: 1.9),
+            Holding(symbol: "510300", name: "沪深300ETF", market: "A股", assetType: "ETF", industry: "其他", quantity: 100, averageCost: 4, currentPrice: 4.2, annualDividendPerShare: 0.1),
+            Holding(symbol: "00700", name: "腾讯控股", market: "港股", assetType: "股票", industry: "科技", quantity: 100, averageCost: 300, currentPrice: 380, annualDividendPerShare: 2.4),
+            Holding(symbol: "000651", name: "格力电器", market: "A股", assetType: "股票", industry: "消费", quantity: 500, averageCost: 45, currentPrice: 50, annualDividendPerShare: 2.0)
         ]
 
         let overview = AssetInsightService.overview(for: holdings)
 
+        #expect(overview.totalValue == 103_420)
+        #expect(overview.totalDividend == 3_150)
+        #expect(overview.avgYield == 3_150.0 / 103_420.0)
+
+        #expect(overview.topIndustries.map(\.category) == ["银行", "科技", "消费"])
+        #expect(overview.topIndustries.map(\.percentage) == [
+            40_000.0 / 103_420.0,
+            38_000.0 / 103_420.0,
+            25_000.0 / 103_420.0
+        ])
+
         #expect(overview.marketSummary.map(\.category) == ["A股", "港股"])
-        #expect(overview.assetTypeSummary.map(\.category).contains("股票"))
-        #expect(overview.assetTypeSummary.map(\.category).contains("基金"))
+        #expect(overview.marketSummary.map(\.percentage) == [
+            65_420.0 / 103_420.0,
+            38_000.0 / 103_420.0
+        ])
+
+        #expect(overview.assetTypeSummary.map(\.category) == ["股票", "基金"])
+        #expect(overview.assetTypeSummary.map(\.percentage) == [
+            103_000.0 / 103_420.0,
+            420.0 / 103_420.0
+        ])
+
+        #expect(overview.largestHolding?.symbol == "600036")
+        #expect(overview.topThreeConcentration == 103_000.0 / 103_420.0)
     }
 
     @Test
