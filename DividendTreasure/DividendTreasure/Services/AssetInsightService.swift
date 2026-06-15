@@ -10,6 +10,17 @@ import SwiftUI
 
 // MARK: - 统计数据模型
 
+enum AssetInsightDimension {
+    case assetType
+    case industry
+    case market
+}
+
+enum AssetTypeGrouping {
+    case summary
+    case detail
+}
+
 struct AssetBreakdown: Identifiable {
     let id = UUID()
     let category: String
@@ -26,117 +37,172 @@ struct AssetBreakdown: Identifiable {
     }
 }
 
+struct AssetDrilldownItem: Identifiable {
+    let id = UUID()
+    let category: String
+    let holding: Holding
+    let amount: Double
+    let percentageWithinCategory: Double
+}
+
 // MARK: - 资产透视服务
 
 struct AssetInsightService {
+
+    // MARK: - 统一统计入口
+
+    static func breakdown(
+        for dimension: AssetInsightDimension,
+        holdings: [Holding],
+        assetTypeGrouping: AssetTypeGrouping = .summary
+    ) -> [AssetBreakdown] {
+        let grouped = Dictionary(grouping: holdings) { holding in
+            category(for: holding, dimension: dimension, assetTypeGrouping: assetTypeGrouping)
+        }
+
+        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+
+        return grouped.map { category, items in
+            let amount = items.reduce(0) { $0 + $1.marketValue }
+            let percentage = totalValue > 0 ? amount / totalValue : 0
+            return AssetBreakdown(
+                category: category,
+                amount: amount,
+                percentage: percentage,
+                holdings: items.sorted { $0.marketValue > $1.marketValue }
+            )
+        }
+        .sorted { $0.amount > $1.amount }
+    }
+
+    static func drilldown(
+        for dimension: AssetInsightDimension,
+        category selectedCategory: String,
+        holdings: [Holding]
+    ) -> [AssetDrilldownItem] {
+        let matchingHoldings = holdings.filter { holding in
+            self.category(for: holding, dimension: dimension, assetTypeGrouping: AssetTypeGrouping.summary) == normalizedCategory(selectedCategory)
+        }
+
+        let categoryTotal = matchingHoldings.reduce(0) { $0 + $1.marketValue }
+
+        return matchingHoldings
+            .sorted { $0.marketValue > $1.marketValue }
+            .map { holding in
+                let amount = holding.marketValue
+                let percentageWithinCategory = categoryTotal > 0 ? amount / categoryTotal : 0
+                return AssetDrilldownItem(
+                    category: normalizedCategory(selectedCategory),
+                    holding: holding,
+                    amount: amount,
+                    percentageWithinCategory: percentageWithinCategory
+                )
+            }
+    }
+
+    static func overview(for holdings: [Holding]) -> AssetInsightOverview {
+        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
+        let totalDividend = holdings.reduce(0) { $0 + $1.annualDividend }
+        let sorted = holdings.sorted { $0.marketValue > $1.marketValue }
+        let topThree = sorted.prefix(3).reduce(0) { $0 + $1.marketValue }
+        let industryBreakdown = breakdown(for: .industry, holdings: holdings, assetTypeGrouping: .summary)
+        let industryOrder = holdings.reduce(into: [String]()) { result, holding in
+            let category = normalizedIndustry(holding)
+            if !result.contains(category) {
+                result.append(category)
+            }
+        }
+        let breakdownLookup = Dictionary(uniqueKeysWithValues: industryBreakdown.map { ($0.category, $0) })
+        let topIndustries = Array(industryOrder.compactMap { breakdownLookup[$0] }.prefix(3))
+        let marketSummary = breakdown(for: .market, holdings: holdings, assetTypeGrouping: .summary)
+        let assetTypeSummary = breakdown(for: .assetType, holdings: holdings, assetTypeGrouping: .summary)
+
+        return AssetInsightOverview(
+            totalValue: totalValue,
+            totalDividend: totalDividend,
+            avgYield: totalValue > 0 ? totalDividend / totalValue : 0,
+            holdingsCount: holdings.count,
+            topAssetType: assetTypeSummary.first?.category ?? "-",
+            topIndustry: topIndustries.first?.category ?? "-",
+            topMarket: marketSummary.first?.category ?? "-",
+            topIndustries: topIndustries,
+            marketSummary: marketSummary,
+            assetTypeSummary: assetTypeSummary,
+            topThreeConcentration: totalValue > 0 ? topThree / totalValue : 0,
+            largestHolding: sorted.first
+        )
+    }
 
     // MARK: - 按资产类型统计
 
     /// 按资产类型基础分类统计
     static func breakdownByAssetType(holdings: [Holding]) -> [AssetBreakdown] {
-        let grouped = Dictionary(grouping: holdings) { holding in
-            // 基础分类映射
-            switch holding.assetType {
-            case "股票":
-                return "股票"
-            case "ETF", "指数基金":
-                return "基金"
-            case "债券":
-                return "债券"
-            case "货币基金":
-                return "现金"
-            default:
-                return "其他"
-            }
-        }
-
-        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
-
-        return grouped.map { (category, items) in
-            let amount = items.reduce(0) { $0 + $1.marketValue }
-            let percentage = totalValue > 0 ? amount / totalValue : 0
-            return AssetBreakdown(
-                category: category,
-                amount: amount,
-                percentage: percentage,
-                holdings: items
-            )
-        }.sorted { $0.amount > $1.amount }
+        breakdown(for: .assetType, holdings: holdings, assetTypeGrouping: .summary)
     }
 
     /// 按资产类型细分统计
     static func breakdownByAssetTypeDetail(holdings: [Holding]) -> [AssetBreakdown] {
-        let grouped = Dictionary(grouping: holdings) { $0.assetType }
-
-        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
-
-        return grouped.map { (category, items) in
-            let amount = items.reduce(0) { $0 + $1.marketValue }
-            let percentage = totalValue > 0 ? amount / totalValue : 0
-            return AssetBreakdown(
-                category: category,
-                amount: amount,
-                percentage: percentage,
-                holdings: items
-            )
-        }.sorted { $0.amount > $1.amount }
+        breakdown(for: .assetType, holdings: holdings, assetTypeGrouping: .detail)
     }
 
     // MARK: - 按行业统计
 
     static func breakdownByIndustry(holdings: [Holding]) -> [AssetBreakdown] {
-        let grouped = Dictionary(grouping: holdings) { $0.industry }
-
-        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
-
-        return grouped.map { (category, items) in
-            let amount = items.reduce(0) { $0 + $1.marketValue }
-            let percentage = totalValue > 0 ? amount / totalValue : 0
-            return AssetBreakdown(
-                category: category,
-                amount: amount,
-                percentage: percentage,
-                holdings: items
-            )
-        }.sorted { $0.amount > $1.amount }
+        breakdown(for: .industry, holdings: holdings, assetTypeGrouping: .summary)
     }
 
     // MARK: - 按市场统计
 
     static func breakdownByMarket(holdings: [Holding]) -> [AssetBreakdown] {
-        let grouped = Dictionary(grouping: holdings) { $0.market }
-
-        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
-
-        return grouped.map { (category, items) in
-            let amount = items.reduce(0) { $0 + $1.marketValue }
-            let percentage = totalValue > 0 ? amount / totalValue : 0
-            return AssetBreakdown(
-                category: category,
-                amount: amount,
-                percentage: percentage,
-                holdings: items
-            )
-        }.sorted { $0.amount > $1.amount }
+        breakdown(for: .market, holdings: holdings, assetTypeGrouping: .summary)
     }
 
     // MARK: - 统计概览
 
     /// 获取所有维度的统计概览
     static func getOverview(holdings: [Holding]) -> AssetInsightOverview {
-        let totalValue = holdings.reduce(0) { $0 + $1.marketValue }
-        let totalDividend = holdings.reduce(0) { $0 + $1.annualDividend }
-        let avgYield = totalValue > 0 ? totalDividend / totalValue : 0
+        overview(for: holdings)
+    }
 
-        return AssetInsightOverview(
-            totalValue: totalValue,
-            totalDividend: totalDividend,
-            avgYield: avgYield,
-            holdingsCount: holdings.count,
-            topAssetType: breakdownByAssetType(holdings: holdings).first?.category ?? "-",
-            topIndustry: breakdownByIndustry(holdings: holdings).first?.category ?? "-",
-            topMarket: breakdownByMarket(holdings: holdings).first?.category ?? "-"
-        )
+    private static func category(
+        for holding: Holding,
+        dimension: AssetInsightDimension,
+        assetTypeGrouping: AssetTypeGrouping
+    ) -> String {
+        switch dimension {
+        case .assetType:
+            switch assetTypeGrouping {
+            case .summary:
+                switch holding.assetType {
+                case "股票":
+                    return "股票"
+                case "ETF", "指数基金":
+                    return "基金"
+                case "债券":
+                    return "债券"
+                case "货币基金":
+                    return "现金"
+                default:
+                    return "其他"
+                }
+            case .detail:
+                return normalizedCategory(holding.assetType)
+            }
+        case .industry:
+            return normalizedIndustry(holding)
+        case .market:
+            return normalizedCategory(holding.market)
+        }
+    }
+
+    private static func normalizedCategory(_ rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "其他" : trimmed
+    }
+
+    private static func normalizedIndustry(_ holding: Holding) -> String {
+        let raw = holding.industry.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "其他" : raw
     }
 }
 
@@ -150,6 +216,11 @@ struct AssetInsightOverview {
     let topAssetType: String
     let topIndustry: String
     let topMarket: String
+    let topIndustries: [AssetBreakdown]
+    let marketSummary: [AssetBreakdown]
+    let assetTypeSummary: [AssetBreakdown]
+    let topThreeConcentration: Double
+    let largestHolding: Holding?
 }
 
 // MARK: - 图表颜色
