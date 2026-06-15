@@ -69,4 +69,26 @@ struct DividendTreasureTests {
         #expect(breakdown.map(\.amount) == [1000.0, 1000.0, 500.0])
     }
 
+    @Test
+    func holdingClassificationResolvesBankAndTechnologyHoldings() {
+        let bank = HoldingClassificationService.resolve(symbol: "600036", name: "招商银行", market: "A股")
+        let tech = HoldingClassificationService.resolve(symbol: "00700", name: "腾讯控股", market: "港股")
+
+        #expect(bank.assetType == "股票")
+        #expect(bank.industry == "银行")
+        #expect(tech.assetType == "股票")
+        #expect(tech.industry == "科技")
+    }
+
+    @Test
+    func holdingClassificationDetectsFundAndFallbacksToOtherIndustry() {
+        let etf = HoldingClassificationService.resolve(symbol: "510300", name: "沪深300ETF", market: "A股")
+        let unknown = HoldingClassificationService.resolve(symbol: "XYZ", name: "未知资产", market: "美股")
+
+        #expect(etf.assetType == "ETF")
+        #expect(etf.industry == "其他")
+        #expect(unknown.assetType == "股票")
+        #expect(unknown.industry == "其他")
+    }
+
 }

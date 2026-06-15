@@ -114,10 +114,19 @@ struct OCRReviewView: View {
         let confirmed = candidates.filter { $0.isConfirmed }
 
         for item in confirmed {
+            let inferredMarket = inferMarket(for: item.symbol)
+            let classification = HoldingClassificationService.resolve(
+                symbol: item.symbol ?? "",
+                name: item.name ?? "未知",
+                market: inferredMarket
+            )
+
             let holding = Holding(
                 symbol: item.symbol ?? "",
                 name: item.name ?? "未知",
-                market: "A股",
+                market: inferredMarket,
+                assetType: classification.assetType,
+                industry: classification.industry,
                 quantity: item.quantity ?? 0,
                 currentPrice: item.currentPrice ?? 0
             )
@@ -129,7 +138,7 @@ struct OCRReviewView: View {
         Task {
             for item in confirmed {
                 if let symbol = item.symbol {
-                    let marketCode = symbol.hasPrefix("6") ? "1" : "1"
+                    let marketCode = marketCode(for: inferMarket(for: item.symbol))
                     let stockData = try? await StockDataService.shared.fetchStockData(
                         symbol: symbol,
                         marketCode: marketCode
@@ -155,6 +164,31 @@ struct OCRReviewView: View {
                 isImporting = false
                 importSuccess = true
             }
+        }
+    }
+
+    private func inferMarket(for symbol: String?) -> String {
+        guard let symbol, !symbol.isEmpty else {
+            return "A股"
+        }
+
+        if symbol.count == 5, symbol.allSatisfy(\.isNumber) {
+            return "港股"
+        }
+
+        if symbol.count <= 4, symbol.allSatisfy({ $0.isLetter || $0.isNumber }) {
+            return "美股"
+        }
+
+        return "A股"
+    }
+
+    private func marketCode(for market: String) -> String {
+        switch market {
+        case "港股":
+            return "0"
+        default:
+            return "1"
         }
     }
 }

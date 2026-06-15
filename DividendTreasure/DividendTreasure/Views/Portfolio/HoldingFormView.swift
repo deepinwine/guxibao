@@ -196,6 +196,14 @@ struct HoldingFormView: View {
                     name = result.name
                     market = result.market
 
+                    let classification = HoldingClassificationService.resolve(
+                        symbol: result.symbol,
+                        name: result.name,
+                        market: result.market
+                    )
+                    assetType = classification.assetType
+                    industry = classification.industry
+
                     // 如果有股息数据，自动填充
                     if let data = stockData {
                         if data.currentPrice > 0 {
