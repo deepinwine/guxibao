@@ -114,19 +114,17 @@ struct OCRReviewView: View {
         let confirmed = candidates.filter { $0.isConfirmed }
 
         for item in confirmed {
-            let inferredMarket = inferMarket(for: item.symbol)
-            let classification = HoldingClassificationService.resolve(
-                symbol: item.symbol ?? "",
-                name: item.name ?? "未知",
-                market: inferredMarket
+            let resolution = HoldingClassificationService.resolve(
+                symbol: item.symbol,
+                name: item.name ?? "未知"
             )
 
             let holding = Holding(
                 symbol: item.symbol ?? "",
                 name: item.name ?? "未知",
-                market: inferredMarket,
-                assetType: classification.assetType,
-                industry: classification.industry,
+                market: resolution.market,
+                assetType: resolution.assetType,
+                industry: resolution.industry,
                 quantity: item.quantity ?? 0,
                 currentPrice: item.currentPrice ?? 0
             )
@@ -138,10 +136,13 @@ struct OCRReviewView: View {
         Task {
             for item in confirmed {
                 if let symbol = item.symbol {
-                    let marketCode = Self.marketCode(for: inferMarket(for: item.symbol))
+                    let resolution = HoldingClassificationService.resolve(
+                        symbol: item.symbol,
+                        name: item.name ?? "未知"
+                    )
                     let stockData = try? await StockDataService.shared.fetchStockData(
                         symbol: symbol,
-                        marketCode: marketCode
+                        marketCode: resolution.marketCode
                     )
 
                     if let data = stockData, data.latestDividend > 0 {
@@ -164,35 +165,6 @@ struct OCRReviewView: View {
                 isImporting = false
                 importSuccess = true
             }
-        }
-    }
-
-    private func inferMarket(for symbol: String?) -> String {
-        guard let symbol, !symbol.isEmpty else {
-            return "A股"
-        }
-
-        if symbol.count == 5, symbol.allSatisfy(\.isNumber) {
-            return "港股"
-        }
-
-        if symbol.count <= 4, symbol.allSatisfy({ $0.isLetter || $0.isNumber }) {
-            return "美股"
-        }
-
-        return "A股"
-    }
-
-    static func marketCode(for market: String) -> String {
-        switch market {
-        case "美股":
-            return "105"
-        case "港股":
-            return "0"
-        case "A股":
-            return "1"
-        default:
-            return "1"
         }
     }
 }

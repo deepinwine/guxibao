@@ -92,10 +92,20 @@ struct DividendTreasureTests {
     }
 
     @Test
-    func ocrReviewViewMapsInferredMarketToExpectedMarketCode() {
-        #expect(OCRReviewView.marketCode(for: "A股") == "1")
-        #expect(OCRReviewView.marketCode(for: "港股") == "0")
-        #expect(OCRReviewView.marketCode(for: "美股") == "105")
+    func holdingClassificationResolvesMarketAndMarketCodeFromSymbol() {
+        let aShare = HoldingClassificationService.resolve(symbol: "600036", name: "招商银行")
+        let hongKong = HoldingClassificationService.resolve(symbol: "00700", name: "腾讯控股")
+        let usWithLetters = HoldingClassificationService.resolve(symbol: "GOOGL", name: "Alphabet")
+        let usWithDot = HoldingClassificationService.resolve(symbol: "BRK.B", name: "Berkshire Hathaway")
+
+        #expect(aShare.market == "A股")
+        #expect(aShare.marketCode == "1")
+        #expect(hongKong.market == "港股")
+        #expect(hongKong.marketCode == "0")
+        #expect(usWithLetters.market == "美股")
+        #expect(usWithLetters.marketCode == "105")
+        #expect(usWithDot.market == "美股")
+        #expect(usWithDot.marketCode == "105")
     }
 
 }
