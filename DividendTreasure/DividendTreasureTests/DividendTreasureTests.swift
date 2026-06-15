@@ -28,6 +28,21 @@ struct DividendTreasureTests {
     }
 
     @Test
+    func assetInsightOverviewIncludesMarketAndAssetTypeSummaries() {
+        let holdings = [
+            Holding(symbol: "600036", name: "招商银行", market: "A股", assetType: "股票", industry: "银行", quantity: 1000, averageCost: 30, currentPrice: 40),
+            Holding(symbol: "510300", name: "沪深300ETF", market: "A股", assetType: "ETF", industry: "其他", quantity: 100, averageCost: 4, currentPrice: 4.2),
+            Holding(symbol: "00700", name: "腾讯控股", market: "港股", assetType: "股票", industry: "科技", quantity: 100, averageCost: 300, currentPrice: 380)
+        ]
+
+        let overview = AssetInsightService.overview(for: holdings)
+
+        #expect(overview.marketSummary.map(\.category) == ["A股", "港股"])
+        #expect(overview.assetTypeSummary.map(\.category).contains("股票"))
+        #expect(overview.assetTypeSummary.map(\.category).contains("基金"))
+    }
+
+    @Test
     func assetInsightBreakdownNormalizesEmptyIndustryIntoOther() {
         let holdings = [
             Holding(symbol: "A", name: "空行业", market: "A股", assetType: "股票", industry: "", quantity: 100, averageCost: 10, currentPrice: 12),

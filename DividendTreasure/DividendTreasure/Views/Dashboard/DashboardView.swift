@@ -28,10 +28,7 @@ struct DashboardView: View {
 
                     // 资产透视卡片
                     AssetOverviewCard(
-                        totalMarketValue: totalMarketValue,
-                        totalAnnualDividend: totalAnnualDividend,
-                        portfolioYield: portfolioYield,
-                        topHoldings: topHoldings,
+                        overview: assetInsightOverview,
                         portfoliosCount: portfolios.count
                     )
 
@@ -69,17 +66,12 @@ struct DashboardView: View {
         portfolios.reduce(0) { $0 + CalculationService.portfolioAnnualDividend(holdings: $1.holdings) }
     }
 
-    private var portfolioYield: Double {
-        CalculationService.portfolioDividendYield(holdings: allHoldings)
+    private var assetInsightOverview: AssetInsightOverview {
+        AssetInsightService.overview(for: allHoldings)
     }
 
     private var allHoldings: [Holding] {
         portfolios.flatMap { $0.holdings }
-    }
-
-    private var topHoldings: [(symbol: String, name: String, yield: Double)] {
-        let sorted = CalculationService.holdingsByYield(holdings: allHoldings)
-        return sorted.prefix(3).map { ($0.symbol, $0.name, $0.dividendYield) }
     }
 }
 
