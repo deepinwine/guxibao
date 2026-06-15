@@ -72,7 +72,12 @@ struct AssetInsightService {
                 holdings: items.sorted { $0.marketValue > $1.marketValue }
             )
         }
-        .sorted { $0.amount > $1.amount }
+        .sorted {
+            if $0.amount != $1.amount {
+                return $0.amount > $1.amount
+            }
+            return $0.category < $1.category
+        }
     }
 
     static func drilldown(

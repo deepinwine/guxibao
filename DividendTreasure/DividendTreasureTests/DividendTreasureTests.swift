@@ -10,12 +10,6 @@ import Testing
 
 struct DividendTreasureTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-        // Swift Testing Documentation
-        // https://developer.apple.com/documentation/testing
-    }
-
     @Test
     func assetInsightOverviewBuildsIndustrySummaryAndConcentration() {
         let holdings = [
@@ -29,7 +23,7 @@ struct DividendTreasureTests {
         #expect(overview.topIndustries.map(\.category) == ["其他", "银行", "科技"])
         #expect(overview.topIndustries.first?.percentage == 50_000.0 / 128_000.0)
         #expect(overview.topIndustry == "其他")
-        #expect(overview.topThreeConcentration > 0.99)
+        #expect(overview.topThreeConcentration == 1.0)
         #expect(overview.largestHolding?.symbol == "511880")
     }
 
@@ -58,6 +52,21 @@ struct DividendTreasureTests {
 
         #expect(drilldown.map(\.holding.symbol) == ["600036", "601398"])
         #expect(drilldown.allSatisfy { $0.category == "银行" })
+        #expect(drilldown.map(\.percentageWithinCategory) == [40000.0 / 44800.0, 4800.0 / 44800.0])
+    }
+
+    @Test
+    func assetInsightBreakdownUsesStableTieBreakOnCategory() {
+        let holdings = [
+            Holding(symbol: "A1", name: "并列甲", market: "A股", assetType: "股票", industry: "B行业", quantity: 100, averageCost: 10, currentPrice: 10),
+            Holding(symbol: "B1", name: "并列乙", market: "A股", assetType: "股票", industry: "A行业", quantity: 100, averageCost: 10, currentPrice: 10),
+            Holding(symbol: "C1", name: "非并列", market: "A股", assetType: "股票", industry: "C行业", quantity: 50, averageCost: 10, currentPrice: 10)
+        ]
+
+        let breakdown = AssetInsightService.breakdown(for: .industry, holdings: holdings, assetTypeGrouping: .summary)
+
+        #expect(breakdown.map(\.category) == ["A行业", "B行业", "C行业"])
+        #expect(breakdown.map(\.amount) == [1000.0, 1000.0, 500.0])
     }
 
 }
