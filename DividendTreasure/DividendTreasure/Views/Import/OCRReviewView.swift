@@ -138,7 +138,7 @@ struct OCRReviewView: View {
         Task {
             for item in confirmed {
                 if let symbol = item.symbol {
-                    let marketCode = marketCode(for: inferMarket(for: item.symbol))
+                    let marketCode = Self.marketCode(for: inferMarket(for: item.symbol))
                     let stockData = try? await StockDataService.shared.fetchStockData(
                         symbol: symbol,
                         marketCode: marketCode
@@ -183,10 +183,14 @@ struct OCRReviewView: View {
         return "A股"
     }
 
-    private func marketCode(for market: String) -> String {
+    static func marketCode(for market: String) -> String {
         switch market {
+        case "美股":
+            return "105"
         case "港股":
             return "0"
+        case "A股":
+            return "1"
         default:
             return "1"
         }

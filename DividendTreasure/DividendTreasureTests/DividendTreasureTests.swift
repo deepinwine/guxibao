@@ -91,4 +91,11 @@ struct DividendTreasureTests {
         #expect(unknown.industry == "其他")
     }
 
+    @Test
+    func ocrReviewViewMapsInferredMarketToExpectedMarketCode() {
+        #expect(OCRReviewView.marketCode(for: "A股") == "1")
+        #expect(OCRReviewView.marketCode(for: "港股") == "0")
+        #expect(OCRReviewView.marketCode(for: "美股") == "105")
+    }
+
 }
