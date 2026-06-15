@@ -94,6 +94,38 @@ struct DividendTreasureTests {
     }
 
     @Test
+    func assetInsightDrilldownSortsByMarketValueDescending() {
+        let holdings = [
+            Holding(symbol: "600036", name: "招商银行", market: "A股", assetType: "股票", industry: "银行", quantity: 1000, averageCost: 30, currentPrice: 40),
+            Holding(symbol: "601398", name: "工商银行", market: "A股", assetType: "股票", industry: "银行", quantity: 800, averageCost: 5, currentPrice: 6)
+        ]
+
+        let drilldown = AssetInsightService.drilldown(for: .industry, category: "银行", holdings: holdings)
+
+        #expect(drilldown.first?.holding.symbol == "600036")
+        #expect(drilldown.first?.percentageWithinCategory == 40_000.0 / 44_800.0)
+    }
+
+    @Test
+    func assetInsightDrilldownRespectsDetailedAssetTypeGrouping() {
+        let holdings = [
+            Holding(symbol: "510300", name: "沪深300ETF", market: "A股", assetType: "ETF", industry: "其他", quantity: 100, averageCost: 4, currentPrice: 4.2),
+            Holding(symbol: "159915", name: "创业板ETF", market: "A股", assetType: "ETF", industry: "其他", quantity: 200, averageCost: 2, currentPrice: 2.2),
+            Holding(symbol: "600036", name: "招商银行", market: "A股", assetType: "股票", industry: "银行", quantity: 1000, averageCost: 30, currentPrice: 40)
+        ]
+
+        let drilldown = AssetInsightService.drilldown(
+            for: .assetType,
+            category: "ETF",
+            holdings: holdings,
+            assetTypeGrouping: .detail
+        )
+
+        #expect(drilldown.map(\.holding.symbol) == ["159915", "510300"])
+        #expect(drilldown.allSatisfy { $0.category == "ETF" })
+    }
+
+    @Test
     func assetInsightBreakdownUsesStableTieBreakOnCategory() {
         let holdings = [
             Holding(symbol: "A1", name: "并列甲", market: "A股", assetType: "股票", industry: "B行业", quantity: 100, averageCost: 10, currentPrice: 10),

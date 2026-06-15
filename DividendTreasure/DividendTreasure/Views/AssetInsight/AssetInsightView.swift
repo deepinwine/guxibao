@@ -12,15 +12,10 @@ import Charts
 struct AssetInsightView: View {
     @Query private var portfolios: [Portfolio]
 
-    @State private var selectedDimension: Dimension = .assetType
+    @State private var selectedDimension: AssetInsightDimension = .industry
     @State private var displayMode: DisplayMode = .amount
-    @State private var isDetailMode: Bool = false
-
-    enum Dimension: String, CaseIterable {
-        case assetType = "资产类型"
-        case industry = "行业分布"
-        case market = "市场分布"
-    }
+    @State private var assetTypeGrouping: AssetTypeGrouping = .summary
+    @State private var selectedCategory: String?
 
     enum DisplayMode: String, CaseIterable {
         case amount = "金额"
@@ -32,16 +27,21 @@ struct AssetInsightView: View {
     }
 
     private var breakdownData: [AssetBreakdown] {
-        switch selectedDimension {
-        case .assetType:
-            return isDetailMode ?
-                AssetInsightService.breakdownByAssetTypeDetail(holdings: allHoldings) :
-                AssetInsightService.breakdownByAssetType(holdings: allHoldings)
-        case .industry:
-            return AssetInsightService.breakdownByIndustry(holdings: allHoldings)
-        case .market:
-            return AssetInsightService.breakdownByMarket(holdings: allHoldings)
-        }
+        AssetInsightService.breakdown(
+            for: selectedDimension,
+            holdings: allHoldings,
+            assetTypeGrouping: assetTypeGrouping
+        )
+    }
+
+    private var drilldownData: [AssetDrilldownItem] {
+        guard let selectedCategory else { return [] }
+        return AssetInsightService.drilldown(
+            for: selectedDimension,
+            category: selectedCategory,
+            holdings: allHoldings,
+            assetTypeGrouping: assetTypeGrouping
+        )
     }
 
     var body: some View {
@@ -49,8 +49,8 @@ struct AssetInsightView: View {
             VStack(spacing: 0) {
                 // 维度选择器
                 Picker("维度", selection: $selectedDimension) {
-                    ForEach(Dimension.allCases, id: \.rawValue) { dim in
-                        Text(dim.rawValue).tag(dim)
+                    ForEach(AssetInsightDimension.allCases, id: \.self) { dimension in
+                        Text(title(for: dimension)).tag(dimension)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -68,12 +68,12 @@ struct AssetInsightView: View {
                     .frame(maxWidth: 150)
 
                     // 基础/细分切换（仅资产类型）
-                    if selectedDimension == .assetType {
-                        Toggle(isOn: $isDetailMode) {
-                            Text("细分")
-                                .font(.caption)
+                    if showsAssetTypeGrouping {
+                        Picker("资产类型分组", selection: $assetTypeGrouping) {
+                            Text("汇总").tag(AssetTypeGrouping.summary)
+                            Text("细分").tag(AssetTypeGrouping.detail)
                         }
-                        .toggleStyle(.button)
+                        .pickerStyle(.segmented)
                     }
                 }
                 .padding(.horizontal)
@@ -106,8 +106,20 @@ struct AssetInsightView: View {
                             // 详细列表
                             AssetBreakdownListView(
                                 breakdowns: breakdownData,
-                                displayMode: displayMode
+                                displayMode: displayMode,
+                                selectedCategory: selectedCategory,
+                                onSelect: { category in
+                                    selectedCategory = category
+                                }
                             )
+
+                            if let selectedCategory {
+                                AssetDrilldownSection(
+                                    category: selectedCategory,
+                                    items: drilldownData,
+                                    onClose: { self.selectedCategory = nil }
+                                )
+                            }
                         }
                         .padding(.bottom, 20)
                     }
@@ -116,6 +128,28 @@ struct AssetInsightView: View {
             .navigationTitle("资产透视")
             .navigationBarTitleDisplayMode(.inline)
             .background(Color(.systemGroupedBackground))
+            .onChange(of: selectedDimension) { _, _ in
+                assetTypeGrouping = selectedDimension == .assetType ? assetTypeGrouping : .summary
+                selectedCategory = nil
+            }
+            .onChange(of: assetTypeGrouping) { _, _ in
+                selectedCategory = nil
+            }
+        }
+    }
+
+    private var showsAssetTypeGrouping: Bool {
+        selectedDimension == .assetType
+    }
+
+    private func title(for dimension: AssetInsightDimension) -> String {
+        switch dimension {
+        case .assetType:
+            return "资产类型"
+        case .industry:
+            return "行业分布"
+        case .market:
+            return "市场分布"
         }
     }
 }
@@ -220,6 +254,8 @@ struct AssetBarChartView: View {
 struct AssetBreakdownListView: View {
     let breakdowns: [AssetBreakdown]
     let displayMode: AssetInsightView.DisplayMode
+    let selectedCategory: String?
+    let onSelect: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -232,47 +268,34 @@ struct AssetBreakdownListView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(breakdowns) { item in
-                    HStack(spacing: 12) {
-                        // 颜色标识
-                        Circle()
-                            .fill(item.getColor().color)
-                            .frame(width: 12, height: 12)
+                    Button {
+                        onSelect(item.category)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            AssetBreakdownRow(item: item, displayMode: displayMode)
 
-                        // 分类名称
-                        Text(item.category)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                            GeometryReader { geometry in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color(.systemGray5))
+                                        .frame(height: 6)
 
-                        Spacer()
-
-                        // 数值显示
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(displayMode == .amount ?
-                                 item.displayAmount : item.displayPercentage)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-
-                            // 持仓数量
-                            Text("\(item.holdings.count) 持仓")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(item.getColor().color)
+                                        .frame(width: geometry.size.width * item.percentage, height: 6)
+                                }
+                            }
+                            .frame(height: 6)
                         }
                     }
-                    .padding(.vertical, 8)
-
-                    // 进度条
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color(.systemGray5))
-                                .frame(height: 6)
-
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(item.getColor().color)
-                                .frame(width: geometry.size.width * item.percentage, height: 6)
-                        }
+                    .buttonStyle(.plain)
+                    .padding(12)
+                    .background(selectedCategory == item.category ? item.getColor().color.opacity(0.12) : Color(.systemBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(selectedCategory == item.category ? item.getColor().color : Color(.systemGray5), lineWidth: 1)
                     }
-                    .frame(height: 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
@@ -281,6 +304,118 @@ struct AssetBreakdownListView: View {
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
     }
+}
+
+struct AssetBreakdownRow: View {
+    let item: AssetBreakdown
+    let displayMode: AssetInsightView.DisplayMode
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(item.getColor().color)
+                .frame(width: 12, height: 12)
+
+            Text(item.category)
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(displayMode == .amount ? item.displayAmount : item.displayPercentage)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text("\(item.holdings.count) 持仓")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct AssetDrilldownSection: View {
+    let category: String
+    let items: [AssetDrilldownItem]
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(category) 持仓下钻")
+                        .font(.headline)
+                    Text("按市值从高到低")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("关闭", action: onClose)
+                    .font(.caption)
+            }
+
+            if items.isEmpty {
+                Text("暂无持仓")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(items) { item in
+                    AssetDrilldownRow(item: item)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+    }
+}
+
+struct AssetDrilldownRow: View {
+    let item: AssetDrilldownItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(AssetBreakdown(
+                    category: item.category,
+                    amount: item.amount,
+                    percentage: item.percentageWithinCategory,
+                    holdings: [item.holding]
+                ).getColor().color)
+                .frame(width: 10, height: 10)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.holding.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Text(item.holding.symbol)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(CurrencyFormatter.formatCompact(item.amount))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text(PercentFormatter.format(item.percentageWithinCategory))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private extension AssetInsightDimension {
+    static let allCases: [AssetInsightDimension] = [.assetType, .industry, .market]
 }
 
 #Preview {

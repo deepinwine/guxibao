@@ -83,10 +83,16 @@ struct AssetInsightService {
     static func drilldown(
         for dimension: AssetInsightDimension,
         category selectedCategory: String,
-        holdings: [Holding]
+        holdings: [Holding],
+        assetTypeGrouping: AssetTypeGrouping = .summary
     ) -> [AssetDrilldownItem] {
+        let normalizedSelectedCategory = normalizedCategory(selectedCategory)
         let matchingHoldings = holdings.filter { holding in
-            self.category(for: holding, dimension: dimension, assetTypeGrouping: AssetTypeGrouping.summary) == normalizedCategory(selectedCategory)
+            self.category(
+                for: holding,
+                dimension: dimension,
+                assetTypeGrouping: assetTypeGrouping
+            ) == normalizedSelectedCategory
         }
 
         let categoryTotal = matchingHoldings.reduce(0) { $0 + $1.marketValue }
@@ -97,7 +103,7 @@ struct AssetInsightService {
                 let amount = holding.marketValue
                 let percentageWithinCategory = categoryTotal > 0 ? amount / categoryTotal : 0
                 return AssetDrilldownItem(
-                    category: normalizedCategory(selectedCategory),
+                    category: normalizedSelectedCategory,
                     holding: holding,
                     amount: amount,
                     percentageWithinCategory: percentageWithinCategory
