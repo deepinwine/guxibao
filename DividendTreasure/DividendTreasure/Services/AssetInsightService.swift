@@ -106,14 +106,7 @@ struct AssetInsightService {
         let sorted = holdings.sorted { $0.marketValue > $1.marketValue }
         let topThree = sorted.prefix(3).reduce(0) { $0 + $1.marketValue }
         let industryBreakdown = breakdown(for: .industry, holdings: holdings, assetTypeGrouping: .summary)
-        let industryOrder = holdings.reduce(into: [String]()) { result, holding in
-            let category = normalizedIndustry(holding)
-            if !result.contains(category) {
-                result.append(category)
-            }
-        }
-        let breakdownLookup = Dictionary(uniqueKeysWithValues: industryBreakdown.map { ($0.category, $0) })
-        let topIndustries = Array(industryOrder.compactMap { breakdownLookup[$0] }.prefix(3))
+        let topIndustries = Array(industryBreakdown.prefix(3))
         let marketSummary = breakdown(for: .market, holdings: holdings, assetTypeGrouping: .summary)
         let assetTypeSummary = breakdown(for: .assetType, holdings: holdings, assetTypeGrouping: .summary)
 
@@ -123,7 +116,7 @@ struct AssetInsightService {
             avgYield: totalValue > 0 ? totalDividend / totalValue : 0,
             holdingsCount: holdings.count,
             topAssetType: assetTypeSummary.first?.category ?? "-",
-            topIndustry: topIndustries.first?.category ?? "-",
+            topIndustry: industryBreakdown.first?.category ?? "-",
             topMarket: marketSummary.first?.category ?? "-",
             topIndustries: topIndustries,
             marketSummary: marketSummary,

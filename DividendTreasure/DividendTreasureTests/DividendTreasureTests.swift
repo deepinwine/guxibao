@@ -26,8 +26,9 @@ struct DividendTreasureTests {
 
         let overview = AssetInsightService.overview(for: holdings)
 
-        #expect(overview.topIndustries.map(\.category) == ["银行", "科技", "其他"])
-        #expect(overview.topIndustries.first?.percentage == 40_000.0 / 128_000.0)
+        #expect(overview.topIndustries.map(\.category) == ["其他", "银行", "科技"])
+        #expect(overview.topIndustries.first?.percentage == 50_000.0 / 128_000.0)
+        #expect(overview.topIndustry == "其他")
         #expect(overview.topThreeConcentration > 0.99)
         #expect(overview.largestHolding?.symbol == "511880")
     }
