@@ -99,8 +99,8 @@ struct StockSearchView: View {
                 switch result {
                 case .success(let stocks):
                     searchResults = stocks
-                    // 并行加载每只股票的详细信息
-                    for stock in stocks {
+                    // 只预加载前几条，避免一次搜索后触发过多并发详情请求。
+                    for stock in stocks.prefix(8) {
                         loadStockDetail(for: stock)
                     }
                 case .failure(let error):

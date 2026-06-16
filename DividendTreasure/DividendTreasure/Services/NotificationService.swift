@@ -8,6 +8,7 @@
 import Foundation
 import UserNotifications
 import Combine
+import os
 
 // MARK: - 通知类型
 
@@ -45,7 +46,7 @@ class NotificationService: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.isAuthorized = granted
                 if let error = error {
-                    print("Notification authorization error: \(error)")
+                    AppLogger.notification.error("Notification authorization error: \(String(describing: error), privacy: .public)")
                 }
             }
         }
@@ -62,7 +63,7 @@ class NotificationService: NSObject, ObservableObject {
         targetYield: Double
     ) {
         guard isAuthorized else {
-            print("Notification not authorized")
+            AppLogger.notification.warning("Notification not authorized")
             return
         }
 
@@ -84,7 +85,7 @@ class NotificationService: NSObject, ObservableObject {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Failed to send notification: \(error)")
+                AppLogger.notification.error("Failed to send notification: \(String(describing: error), privacy: .public)")
             }
         }
     }
@@ -98,7 +99,7 @@ class NotificationService: NSObject, ObservableObject {
         isBuy: Bool
     ) {
         guard isAuthorized else {
-            print("Notification not authorized")
+            AppLogger.notification.warning("Notification not authorized")
             return
         }
 
@@ -119,7 +120,7 @@ class NotificationService: NSObject, ObservableObject {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Failed to send notification: \(error)")
+                AppLogger.notification.error("Failed to send notification: \(String(describing: error), privacy: .public)")
             }
         }
     }

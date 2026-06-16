@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import os
 
 // MARK: - 错误类型
 
@@ -48,12 +49,20 @@ struct StockSearchResult: Identifiable, Codable {
 class StockDataService {
     static let shared = StockDataService()
 
-    private init() {}
+    private let session: URLSession
+    private let searchResponseParser = StockSearchResponseParser()
+
+    private init(session: URLSession = StockDataService.makeSession()) {
+        self.session = session
+    }
 
     // MARK: - API配置
 
     /// 东方财富搜索API
     private let eastMoneySearchURL = "https://searchapi.eastmoney.com/api/suggest/get"
+
+    /// 新浪搜索建议API（搜索接口备用）
+    private let sinaSuggestURL = "https://suggest3.sinajs.cn/suggest"
 
     /// 东方财富股票详情API
     private let eastMoneyStockURL = "https://push2.eastmoney.com/api/qt/stock/get"
@@ -65,52 +74,92 @@ class StockDataService {
     private let sinaStockURL = "https://hq.sinajs.cn/list="
 
     // MARK: - 缓存
+    // 注意：本服务为全局单例，缓存会被主线程与 URLSession 后台回调并发访问，
+    // 因此所有读写必须经过 cacheLock 保护，避免 Dictionary 并发访问导致的崩溃/数据损坏。
 
     private var searchCache: [String: [StockSearchResult]] = [:]
     private var stockCache: [String: StockData] = [:]
+    private let cacheLock = NSLock()
     private let cacheTimeout: TimeInterval = 3600 // 1小时缓存
+
+    private func cachedSearch(for keyword: String) -> [StockSearchResult]? {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return searchCache[keyword]
+    }
+
+    private func setCachedSearch(_ stocks: [StockSearchResult], for keyword: String) {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        searchCache[keyword] = stocks
+    }
+
+    private func cachedStock(forKey key: String) -> StockData? {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return stockCache[key]
+    }
+
+    private func setCachedStock(_ stock: StockData, forKey key: String) {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        stockCache[key] = stock
+    }
+
+    private static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 20
+        configuration.waitsForConnectivity = true
+        configuration.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: configuration)
+    }
 
     // MARK: - 搜索股票
 
     /// 根据名称搜索股票
     func searchStock(keyword: String, completion: @escaping (Result<[StockSearchResult], StockDataError>) -> Void) {
+        let normalizedKeyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+
         // 检查缓存
-        if let cached = searchCache[keyword], !cached.isEmpty {
+        if let cached = cachedSearch(for: normalizedKeyword), !cached.isEmpty {
             completion(.success(cached))
             return
         }
 
-        // 使用 suggest API，返回 JSONP 格式
-        let urlStr = "\(eastMoneySearchURL)?cb=&input=\(keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)&type=14"
-
-        guard let url = URL(string: urlStr) else {
+        guard !normalizedKeyword.isEmpty else {
             completion(.failure(.invalidSymbol))
             return
         }
 
-        var request = URLRequest(url: url)
-        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
-        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
+        searchStockFromEastMoney(keyword: normalizedKeyword) { primaryResult in
+            switch primaryResult {
+            case .success(let stocks) where !stocks.isEmpty:
+                self.setCachedSearch(stocks, for: normalizedKeyword)
+                completion(.success(stocks))
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(.networkError(error)))
-                return
-            }
+            case .success, .failure:
+                self.searchStockFromSina(keyword: normalizedKeyword) { fallbackResult in
+                    switch fallbackResult {
+                    case .success(let stocks) where !stocks.isEmpty:
+                        self.setCachedSearch(stocks, for: normalizedKeyword)
+                        completion(.success(stocks))
 
-            guard let data = data else {
-                completion(.failure(.dataNotFound))
-                return
-            }
+                    case .success:
+                        switch primaryResult {
+                        case .failure(let error):
+                            completion(.failure(error))
+                        case .success:
+                            completion(.failure(.dataNotFound))
+                        }
 
-            // 解析搜索结果（JSONP格式）
-            if let result = self.parseEastMoneySearchResult(data) {
-                self.searchCache[keyword] = result
-                completion(.success(result))
-            } else {
-                completion(.failure(.parseError))
+                    case .failure(let fallbackError):
+                        switch primaryResult {
+                        case .failure(let primaryError):
+                            completion(.failure(self.preferredSearchError(primary: primaryError, fallback: fallbackError)))
+                        case .success:
+                            completion(.failure(fallbackError))
+                        }
+                    }
+                }
             }
-        }.resume()
+        }
     }
 
     /// 同步搜索（用于OCR）
@@ -125,7 +174,7 @@ class StockDataService {
             semaphore.signal()
         }
 
-        semaphore.wait()
+        _ = semaphore.wait(timeout: .now() + 12)
         return result
     }
 
@@ -135,7 +184,7 @@ class StockDataService {
     func fetchStockData(symbol: String, marketCode: String, completion: @escaping (Result<StockData, StockDataError>) -> Void) {
         // 检查缓存
         let cacheKey = "\(marketCode).\(symbol)"
-        if let cached = stockCache[cacheKey] {
+        if let cached = cachedStock(forKey: cacheKey) {
             let timeSinceUpdate = Date().timeIntervalSince(cached.lastUpdated)
             if timeSinceUpdate < cacheTimeout {
                 completion(.success(cached))
@@ -159,68 +208,56 @@ class StockDataService {
         request.addValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
         request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                // 尝试备用API
-                self.fetchFromSinaFinance(symbol: symbol, marketCode: marketCode, completion: completion)
-                return
-            }
+        // 东财 push2 免费节点经常返回 502/空响应，加入重试以提升成功率。
+        // 重试次数：共 3 次；失败后回退新浪备用接口。
+        fetchEastMoneyWithRetry(request: request, attempt: 1, maxAttempts: 3, symbol: symbol, marketCode: marketCode, cacheKey: cacheKey, completion: completion)
+    }
 
-            guard let data = data else {
-                completion(.failure(.dataNotFound))
-                return
-            }
-
-            // 解析股票数据
-            if let stockData = self.parseEastMoneyStockData(data, symbol: symbol, marketCode: marketCode) {
-                self.stockCache[cacheKey] = stockData
+    /// 带重试的东方财富请求。push2 节点不稳定（实测频繁 502），
+    /// 单次失败时按指数退避重试，全部失败再回退新浪。
+    private func fetchEastMoneyWithRetry(
+        request: URLRequest,
+        attempt: Int,
+        maxAttempts: Int,
+        symbol: String,
+        marketCode: String,
+        cacheKey: String,
+        completion: @escaping (Result<StockData, StockDataError>) -> Void
+    ) {
+        session.dataTask(with: request) { data, response, error in
+            // 成功解析则返回
+            if error == nil, let data = data,
+               let stockData = self.parseEastMoneyStockData(data, symbol: symbol, marketCode: marketCode) {
+                self.setCachedStock(stockData, forKey: cacheKey)
                 completion(.success(stockData))
-            } else {
-                // 尝试备用API
-                self.fetchFromSinaFinance(symbol: symbol, marketCode: marketCode, completion: completion)
+                return
             }
+
+            // 仍有重试机会 → 退避后重试
+            if attempt < maxAttempts {
+                let delay = Int(attempt) * 400_000_000 // 0.4s, 0.8s, ... (纳秒)
+                DispatchQueue.global().asyncAfter(deadline: .now() + .nanoseconds(delay)) {
+                    self.fetchEastMoneyWithRetry(request: request, attempt: attempt + 1, maxAttempts: maxAttempts, symbol: symbol, marketCode: marketCode, cacheKey: cacheKey, completion: completion)
+                }
+                return
+            }
+
+            // 重试耗尽 → 回退新浪
+            self.fetchFromSinaFinance(symbol: symbol, marketCode: marketCode, completion: completion)
         }.resume()
     }
 
     /// 获取分红数据
-    private func fetchDividendData(symbol: String, marketCode: String, completion: @escaping (Result<(dividendPerShare: Double, date: Date), StockDataError>) -> Void) {
-        // A股使用sh/sz前缀
-        let prefix = marketCode == "1" ? (symbol.hasPrefix("6") ? "sh" : "sz") : ""
-        let urlStr = "\(eastMoneyDividendURL)?code=\(prefix)\(symbol)"
-
-        guard let url = URL(string: urlStr) else {
-            completion(.failure(.invalidSymbol))
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
-        request.addValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
-        request.addValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
-        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(.networkError(error)))
-                return
-            }
-
-            guard let data = data else {
-                completion(.failure(.dataNotFound))
-                return
-            }
-
-            // 解析分红数据
-            if let dividend = self.parseDividendData(data) {
-                completion(.success(dividend))
-            } else {
-                completion(.failure(.dataNotFound))
-            }
-        }.resume()
-    }
+    /// - Note: 该接口当前未接入主流程（股息数据改由 stock/get 的 f173 字段提供），已移除以避免死代码。
 
     /// 新浪财经备用API
     private func fetchFromSinaFinance(symbol: String, marketCode: String, completion: @escaping (Result<StockData, StockDataError>) -> Void) {
+        // 新浪行情接口只能可靠提供股价，不含股息数据。
+        // 回退新浪时，取缓存中上一次的股息作为兜底，避免股息被清零。
+        let cacheKey = "\(marketCode).\(symbol)"
+        let cachedDividend = cachedStock(forKey: cacheKey)?.latestDividend ?? 0
+        let cachedYield = cachedStock(forKey: cacheKey)?.dividendYield ?? 0
+
         // A股添加sh/sz前缀
         let prefix: String
         if marketCode == "1" {
@@ -238,7 +275,7 @@ class StockDataService {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        session.dataTask(with: url) { data, response, error in
             if let error = error {
                 completion(.failure(.networkError(error)))
                 return
@@ -250,9 +287,9 @@ class StockDataService {
             }
 
             // 解析新浪数据
-            if let stockData = self.parseSinaStockData(responseStr, symbol: symbol, marketCode: marketCode) {
+            if let stockData = self.parseSinaStockData(responseStr, symbol: symbol, marketCode: marketCode, fallbackDividend: cachedDividend, fallbackYield: cachedYield) {
                 let cacheKey = "\(marketCode).\(symbol)"
-                self.stockCache[cacheKey] = stockData
+                self.setCachedStock(stockData, forKey: cacheKey)
                 completion(.success(stockData))
             } else {
                 completion(.failure(.parseError))
@@ -260,65 +297,106 @@ class StockDataService {
         }.resume()
     }
 
-    // MARK: - 解析方法
+    private func searchStockFromEastMoney(keyword: String, completion: @escaping (Result<[StockSearchResult], StockDataError>) -> Void) {
+        let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+        let urlStr = "\(eastMoneySearchURL)?cb=&input=\(encodedKeyword)&type=14"
 
-    /// 解析东方财富搜索结果（JSONP格式）
-    private func parseEastMoneySearchResult(_ data: Data) -> [StockSearchResult]? {
-        guard let responseStr = String(data: data, encoding: .utf8) else {
-            return nil
+        guard let url = URL(string: urlStr) else {
+            completion(.failure(.invalidSymbol))
+            return
         }
 
-        // JSONP 格式: ({"QuotationCodeTable":{"Data":[...]}})
-        // 提取括号内的 JSON
-        let startIndex = responseStr.firstIndex(of: "(") ?? responseStr.startIndex
-        let endIndex = responseStr.lastIndex(of: ")") ?? responseStr.endIndex
-        let jsonStr = String(responseStr[responseStr.index(after: startIndex)..<endIndex])
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.addValue("https://quote.eastmoney.com/", forHTTPHeaderField: "Referer")
 
-        guard let jsonData = jsonStr.data(using: .utf8) else {
-            return nil
-        }
-
-        do {
-            guard let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                  let quotationTable = json["QuotationCodeTable"] as? [String: Any],
-                  let dataArray = quotationTable["Data"] as? [[String: Any]] else {
-                return nil
-            }
-
-            var results: [StockSearchResult] = []
-
-            for item in dataArray {
-                guard let code = item["Code"] as? String,
-                      let name = item["Name"] as? String else {
-                    continue
+        perform(request) { result in
+            switch result {
+            case .success(let data):
+                guard let stocks = self.searchResponseParser.parseEastMoneyResult(data) else {
+                    completion(.failure(.parseError))
+                    return
                 }
-
-                // 判断市场
-                let marketCode = item["MktNum"] as? String ?? "1"
-                let market: String
-                switch marketCode {
-                case "1":
-                    market = "A股"
-                case "0":
-                    market = "港股"
-                default:
-                    market = "美股"
-                }
-
-                results.append(StockSearchResult(
-                    symbol: code,
-                    name: name,
-                    market: market,
-                    marketCode: marketCode
-                ))
+                completion(.success(stocks))
+            case .failure(let error):
+                completion(.failure(error))
             }
-
-            return results
-        } catch {
-            print("解析搜索结果失败: \(error)")
-            return nil
         }
     }
+
+    private func searchStockFromSina(keyword: String, completion: @escaping (Result<[StockSearchResult], StockDataError>) -> Void) {
+        let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+        let urlStr = "\(sinaSuggestURL)?type=11,12,13,14,15&key=\(encodedKeyword)"
+
+        guard let url = URL(string: urlStr) else {
+            completion(.failure(.invalidSymbol))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.addValue("https://finance.sina.com.cn/", forHTTPHeaderField: "Referer")
+
+        perform(request) { result in
+            switch result {
+            case .success(let data):
+                guard let stocks = self.searchResponseParser.parseSinaSuggestResult(data) else {
+                    completion(.failure(.parseError))
+                    return
+                }
+                completion(.success(stocks))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+
+    private func perform(_ request: URLRequest, completion: @escaping (Result<Data, StockDataError>) -> Void) {
+        session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(.networkError(error)))
+                return
+            }
+
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 429 {
+                    completion(.failure(.rateLimitExceeded))
+                    return
+                }
+
+                guard (200..<300).contains(httpResponse.statusCode) else {
+                    completion(.failure(.dataNotFound))
+                    return
+                }
+            }
+
+            guard let data, !data.isEmpty else {
+                completion(.failure(.dataNotFound))
+                return
+            }
+
+            completion(.success(data))
+        }.resume()
+    }
+
+    private func preferredSearchError(primary: StockDataError, fallback: StockDataError) -> StockDataError {
+        switch (primary, fallback) {
+        case (.rateLimitExceeded, _), (_, .rateLimitExceeded):
+            return .rateLimitExceeded
+        case (.networkError, .networkError):
+            return primary
+        case (.parseError, .parseError):
+            return .parseError
+        case (.dataNotFound, .dataNotFound):
+            return .dataNotFound
+        default:
+            return fallback
+        }
+    }
+
+    // MARK: - 解析方法
 
     /// 解析东方财富股票数据
     private func parseEastMoneyStockData(_ data: Data, symbol: String, marketCode: String) -> StockData? {
@@ -339,8 +417,21 @@ class StockDataService {
             let yieldInt = dataDict["f162"] as? Int ?? 0
             let dividendYield = Double(yieldInt) / 100.0
 
-            // f173: 每股股息（浮点数，单位是元）
-            let dividendPerShare = dataDict["f173"] as? Double ?? 0
+            // f173: 每股股息（单位是元）
+            // 注意：东财 push2 的 f173 仅对 A股/港股可靠地表示"年化每股股息"；
+            // 美股(secid 105.x)的 f173 口径不明（实测 AAPL 返回 79.54，远超真实年股息~$1），
+            // 且美股 f162(股息率)通常返回 0。因此美股不采用 f173，避免股息率计算严重失真。
+            let isUSStock = (marketCode != "1" && marketCode != "0")
+            let dividendPerShare: Double
+            let resolvedYield: Double
+            if isUSStock {
+                dividendPerShare = 0
+                resolvedYield = 0 // 美股股息由其它途径或保留已有值
+            } else {
+                dividendPerShare = dataDict["f173"] as? Double ?? 0
+                resolvedYield = dividendYield > 0 ? dividendYield
+                    : (dividendPerShare > 0 && currentPrice > 0 ? dividendPerShare / currentPrice : 0)
+            }
 
             let market: String
             switch marketCode {
@@ -359,47 +450,23 @@ class StockDataService {
                 marketCode: marketCode,
                 currentPrice: currentPrice,
                 latestDividend: dividendPerShare,
-                dividendYield: dividendYield > 0 ? dividendYield : (dividendPerShare > 0 && currentPrice > 0 ? dividendPerShare / currentPrice : 0)
+                dividendYield: resolvedYield
             )
 
-            print("解析成功: \(name) (\(symbol)) 价格=\(currentPrice) 股息=\(dividendPerShare) 股息率=\(stockData.dividendYield)")
+            AppLogger.network.info("解析成功: \(name, privacy: .public) (\(symbol, privacy: .public)) 价格=\(currentPrice) 股息=\(dividendPerShare) 股息率=\(stockData.dividendYield)")
 
             return stockData
         } catch {
-            print("解析失败: \(error)")
-            return nil
-        }
-    }
-
-    /// 解析分红数据
-    private func parseDividendData(_ data: Data) -> (dividendPerShare: Double, date: Date)? {
-        do {
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let bonusList = json["bonusList"] as? [[String: Any]],
-                  let latestBonus = bonusList.first else {
-                return nil
-            }
-
-            // 获取最新分红数据
-            if let dividendStr = latestBonus["fxdf"] as? String,
-               let dividend = Double(dividendStr),
-               let dateStr = latestBonus["cqrq"] as? String {
-
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd"
-                let date = dateFormatter.date(from: dateStr) ?? Date()
-
-                return (dividend, date)
-            }
-
-            return nil
-        } catch {
+            AppLogger.network.error("解析失败: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
 
     /// 解析新浪财经数据
-    private func parseSinaStockData(_ response: String, symbol: String, marketCode: String) -> StockData? {
+    /// - Parameters:
+    ///   - fallbackDividend: 新浪无法提供股息时使用的兜底值（通常来自上一次东财缓存）
+    ///   - fallbackYield: 同上，兜底股息率
+    private func parseSinaStockData(_ response: String, symbol: String, marketCode: String, fallbackDividend: Double = 0, fallbackYield: Double = 0) -> StockData? {
         // 新浪数据格式：var hq_str_sh600036="招商银行,30.50,..."
         let components = response.components(separatedBy: "\"")
         guard components.count >= 3 else { return nil }
@@ -422,12 +489,16 @@ class StockDataService {
             market = "美股"
         }
 
+        // 新浪行情接口不含股息数据，使用兜底值（来自上一次东财成功请求的缓存），
+        // 避免东财不可用时股息率/股息被清零。
         return StockData(
             symbol: symbol,
             name: name,
             market: market,
             marketCode: marketCode,
-            currentPrice: currentPrice
+            currentPrice: currentPrice,
+            latestDividend: fallbackDividend,
+            dividendYield: fallbackYield
         )
     }
 }
@@ -522,11 +593,11 @@ extension StockDataService {
                 let yieldValue = dataDict["f162"] as? Int ?? 0
                 let dividendYield = Double(yieldValue) / 100.0
 
-                print("东方财富获取成功: \(symbol) 价格=\(price) 股息=\(dividendPerShare) 股息率=\(dividendYield)%")
+                AppLogger.network.info("东方财富获取成功: \(symbol, privacy: .public) 价格=\(price) 股息=\(dividendPerShare) 股息率=\(dividendYield)%")
                 return price
             }
         } catch {
-            print("东方财富获取失败: \(symbol) - \(error)")
+            AppLogger.network.error("东方财富获取失败: \(symbol, privacy: .public) - \(String(describing: error), privacy: .public)")
         }
 
         // 尝试新浪财经备用API
@@ -563,14 +634,14 @@ extension StockDataService {
                         let name = values[0]
                         let priceStr = values[3]
                         if let price = Double(priceStr) {
-                            print("新浪获取成功: \(name) (\(symbol)) = \(price)")
+                            AppLogger.network.info("新浪获取成功: \(name, privacy: .public) (\(symbol, privacy: .public)) = \(price)")
                             return price
                         }
                     }
                 }
             }
         } catch {
-            print("新浪获取失败: \(symbol) - \(error)")
+            AppLogger.network.error("新浪获取失败: \(symbol, privacy: .public) - \(String(describing: error), privacy: .public)")
         }
         return nil
     }

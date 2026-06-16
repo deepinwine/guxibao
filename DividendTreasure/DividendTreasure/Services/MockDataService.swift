@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import os
 
 class MockDataService {
     static func createSampleData(in context: ModelContext) {
@@ -101,11 +102,9 @@ class MockDataService {
 
         do {
             try context.save()
-            print("✅ Mock data created successfully")
-            print("   - 2 portfolios created")
-            print("   - 5 holdings created")
+            AppLogger.data.info("✅ Mock data created successfully (2 portfolios, 5 holdings)")
         } catch {
-            print("❌ Failed to create mock data: \(error)")
+            AppLogger.data.error("❌ Failed to create mock data: \(String(describing: error), privacy: .public)")
         }
     }
 }

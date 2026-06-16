@@ -64,7 +64,9 @@ enum HoldingClassificationService {
         case "A股":
             return "1"
         default:
-            return "1"
+            // 未知市场不强行映射到 A 股，避免从错误的交易所拉取数据。
+            // 上层（StockDataService）对无效 secid 会请求失败并返回 nil，安全降级。
+            return ""
         }
     }
 

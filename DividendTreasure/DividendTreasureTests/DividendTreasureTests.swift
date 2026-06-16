@@ -2,9 +2,9 @@
 //  DividendTreasureTests.swift
 //  DividendTreasureTests
 //
-//  Created by jiajia on 2026/6/10.
-//
 
+import CoreGraphics
+import Foundation
 import Testing
 @testable import DividendTreasure
 
@@ -178,4 +178,180 @@ struct DividendTreasureTests {
         #expect(usWithDot.marketCode == "105")
     }
 
+    @Test
+    func parserUsesHeaderColumnsToSeparateQuantityAndMarketValue() {
+        let parser = OCRHoldingTableParser(symbolResolver: { _ in nil })
+
+        let rows = [
+            row(y: 0.92, cells: [
+                ("名称", 0.12),
+                ("代码", 0.28),
+                ("持仓数量", 0.56),
+                ("持仓市值", 0.82)
+            ]),
+            row(y: 0.82, cells: [
+                ("贵州茅台", 0.12),
+                ("600519", 0.28),
+                ("100", 0.56),
+                ("146800", 0.82)
+            ]),
+            row(y: 0.72, cells: [
+                ("中国平安", 0.12),
+                ("601318", 0.28),
+                ("6900", 0.56),
+                ("372669", 0.82)
+            ])
+        ]
+
+        let result = parser.parse(observations: rows.flatMap { $0 })
+
+        #expect(result.count == 2)
+        #expect(result[0].symbol == "600519")
+        #expect(result[0].quantity == 100)
+        #expect(result[0].marketValue == 146800)
+        #expect(result[1].symbol == "601318")
+        #expect(result[1].quantity == 6900)
+        #expect(result[1].marketValue == 372669)
+    }
+
+    @Test
+    func parserKeepsNumbersInsideEachRecordBlock() {
+        let parser = OCRHoldingTableParser(symbolResolver: { _ in nil })
+
+        let rows = [
+            row(y: 0.92, cells: [
+                ("名称", 0.12),
+                ("代码", 0.28),
+                ("现价", 0.44),
+                ("持仓数量", 0.60),
+                ("持仓市值", 0.82)
+            ]),
+            row(y: 0.84, cells: [
+                ("迈瑞医疗", 0.12),
+                ("300760", 0.28)
+            ]),
+            row(y: 0.79, cells: [
+                ("246.80", 0.44),
+                ("300", 0.60),
+                ("74040", 0.82)
+            ]),
+            row(y: 0.69, cells: [
+                ("招商银行", 0.12),
+                ("600036", 0.28)
+            ]),
+            row(y: 0.64, cells: [
+                ("43.21", 0.44),
+                ("1200", 0.60),
+                ("51852", 0.82)
+            ])
+        ]
+
+        let result = parser.parse(observations: rows.flatMap { $0 })
+
+        #expect(result.count == 2)
+        #expect(result[0].symbol == "300760")
+        #expect(result[0].quantity == 300)
+        #expect(result[0].marketValue == 74040)
+        #expect(result[1].symbol == "600036")
+        #expect(result[1].quantity == 1200)
+        #expect(result[1].marketValue == 51852)
+    }
+
+    @Test
+    func stockSearchParserDecodesSinaSuggestResponse() throws {
+        let parser = StockSearchResponseParser()
+        let response = #"var suggestvalue="招商银行,11,600036,sh600036,招商银行,,招商银行,99,1,ESG,,;中国平安,11,601318,sh601318,中国平安,,中国平安,99,1,ESG,,";"#
+        let encoding = String.Encoding(
+            rawValue: CFStringConvertEncodingToNSStringEncoding(
+                CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+            )
+        )
+        let data = try #require(response.data(using: encoding))
+
+        let results = try #require(parser.parseSinaSuggestResult(data))
+
+        #expect(results.count == 2)
+        #expect(results[0].symbol == "600036")
+        #expect(results[0].name == "招商银行")
+        #expect(results[0].market == "A股")
+        #expect(results[0].marketCode == "1")
+        #expect(results[1].symbol == "601318")
+    }
+
+    @Test
+    func stockSearchParserReadsCurrentEastMoneyPayload() throws {
+        let parser = StockSearchResponseParser()
+        let response = #"({"QuotationCodeTable":{"Data":[{"Code":"600036","Name":"招商银行","MktNum":"1"}],"Status":0,"Message":"成功"}})"#
+        let data = try #require(response.data(using: .utf8))
+
+        let results = try #require(parser.parseEastMoneyResult(data))
+
+        #expect(results.count == 1)
+        #expect(results[0].symbol == "600036")
+        #expect(results[0].name == "招商银行")
+        #expect(results[0].marketCode == "1")
+    }
+
+    @Test
+    func parserNormalizesCommonOcrMistakesInStockSymbol() {
+        let parser = OCRHoldingTableParser(symbolResolver: { _ in nil })
+
+        let rows = [
+            row(y: 0.92, cells: [
+                ("名称", 0.12),
+                ("代码", 0.28),
+                ("持仓数量", 0.56),
+                ("持仓市值", 0.82)
+            ]),
+            row(y: 0.82, cells: [
+                ("招商银行", 0.12),
+                ("6O0O3G", 0.28),
+                ("1200", 0.56),
+                ("51852", 0.82)
+            ])
+        ]
+
+        let result = parser.parse(observations: rows.flatMap { $0 })
+
+        #expect(result.count == 1)
+        #expect(result[0].symbol == "600036")
+    }
+
+    @Test
+    func parserUsesResolvedSymbolWhenNormalizedCodeStillConflictsWithName() {
+        let parser = OCRHoldingTableParser(symbolResolver: { name in
+            guard name == "招商银行" else { return nil }
+            return StockSearchResult(symbol: "600036", name: "招商银行", market: "A股", marketCode: "1")
+        })
+
+        let rows = [
+            row(y: 0.92, cells: [
+                ("名称", 0.12),
+                ("代码", 0.28),
+                ("持仓数量", 0.56),
+                ("持仓市值", 0.82)
+            ]),
+            row(y: 0.82, cells: [
+                ("招商银行", 0.12),
+                ("6OOO3B", 0.28),
+                ("1200", 0.56),
+                ("51852", 0.82)
+            ])
+        ]
+
+        let result = parser.parse(observations: rows.flatMap { $0 })
+
+        #expect(result.count == 1)
+        #expect(result[0].symbol == "600036")
+        #expect(result[0].name == "招商银行")
+    }
+
+    private func row(y: CGFloat, cells: [(String, CGFloat)]) -> [OCRTextObservation] {
+        cells.map { text, x in
+            OCRTextObservation(
+                text: text,
+                boundingBox: CGRect(x: x, y: y, width: 0.12, height: 0.04)
+            )
+        }
+    }
 }

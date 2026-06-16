@@ -97,6 +97,7 @@ struct OCRReviewView: View {
                 symbol: item.symbol,
                 quantity: item.quantity,
                 currentPrice: item.currentPrice,
+                costPrice: item.costPrice,
                 marketValue: item.marketValue,
                 confidence: item.confidence,
                 isConfirmed: item.confidence > 0.7
@@ -126,6 +127,7 @@ struct OCRReviewView: View {
                 assetType: resolution.assetType,
                 industry: resolution.industry,
                 quantity: item.quantity ?? 0,
+                averageCost: item.costPrice ?? 0,
                 currentPrice: item.currentPrice ?? 0
             )
             holding.portfolio = portfolio
@@ -177,6 +179,7 @@ struct OCRReviewCandidate: Identifiable {
     var symbol: String?
     var quantity: Double?
     var currentPrice: Double?
+    var costPrice: Double?
     var marketValue: Double?
     var confidence: Double
     var isConfirmed: Bool

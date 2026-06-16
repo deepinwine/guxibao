@@ -119,11 +119,13 @@ struct CashflowService {
                     components.day = 15
 
                     if let expectedDate = calendar.date(from: components) {
+                        // 单月预期 = 年度股息 / 年度派息次数（与 getAnnualDividendMonths 口径一致）
+                        let dividendPerMonth = months.isEmpty ? 0 : holding.annualDividend / Double(months.count)
                         let forecast = DividendForecast(
                             symbol: holding.symbol,
                             name: holding.name,
                             expectedDate: expectedDate,
-                            expectedAmount: holding.annualDividend,
+                            expectedAmount: dividendPerMonth,
                             confidence: holding.currentPrice > 0 ? 0.8 : 0.5
                         )
                         forecasts.append(forecast)
@@ -177,14 +179,5 @@ struct CashflowService {
 
         let components = monthsString.components(separatedBy: ",")
         return components.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-    }
-
-    // MARK: - 年度目标进度
-
-    /// 计算年度目标完成进度
-    static func getGoalProgress(holdings: [Holding], target: Double) -> (current: Double, target: Double, percentage: Double) {
-        let current = holdings.reduce(0) { $0 + $1.annualDividend }
-        let percentage = target > 0 ? current / target : 0
-        return (current, target, percentage)
     }
 }

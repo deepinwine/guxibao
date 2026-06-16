@@ -85,7 +85,7 @@ class GridTradingService {
         var levels: [GridLevelParams] = []
 
         let costPrice = parameters.costPrice > 0 ? parameters.costPrice : holding.averageCost
-        guard costPrice > 0 else { return levels }
+        guard costPrice > 0, parameters.levelCount > 0 else { return levels }
 
         // 生成买入档位：低于成本价
         for i in 1...parameters.levelCount {
@@ -164,7 +164,7 @@ class GridTradingService {
     func generateQuickLevels(holding: Holding, currentPrice: Double, yieldStep: Double, levelCount: Int) -> [GridLevelParams] {
         var levels: [GridLevelParams] = []
 
-        guard holding.annualDividendPerShare > 0 else { return levels }
+        guard holding.annualDividendPerShare > 0, levelCount > 0 else { return levels }
 
         let currentYield = calculateYield(annualDividendPerShare: holding.annualDividendPerShare, price: currentPrice)
 
@@ -203,11 +203,13 @@ class GridTradingService {
 
     /// 根据交易记录更新持仓数据
     /// - Parameters:
-    ///   - holding: 持仓信息
+    ///   - holding: 持仓信息（SwiftData @Model，引用类型）
     ///   - trade: 交易记录
-    /// - Returns: 更新后的持仓信息
+    /// - Returns: 传入的同一个 holding 对象（已原地修改）
+    /// - Warning: `Holding` 是 SwiftData `@Model` 类（引用类型），本方法会**原地修改**入参，
+    ///   返回值与入参是同一对象。不要将其当作"返回副本"的纯函数使用。
     func updateHoldingAfterTrade(holding: Holding, trade: TradeRecord) -> Holding {
-        var updatedHolding = holding
+        let updatedHolding = holding
 
         if trade.direction == "买入" {
             // 买入时：新平均成本 = (原平均成本 × 原数量 + 买入金额) ÷ (原数量 + 买入数量)
@@ -241,7 +243,7 @@ class GridTradingService {
         var levels: [GridLevelParams] = []
 
         let currentPrice = holding.currentPrice
-        guard currentPrice > 0 else { return levels }
+        guard currentPrice > 0, levelCount > 0 else { return levels }
 
         let quantity = baseQuantity ?? calculateTradeQuantity(for: holding, at: currentPrice)
 

@@ -8,6 +8,7 @@
 import Foundation
 import StoreKit
 import Combine
+import os
 
 // MARK: - 订阅类型
 
@@ -178,12 +179,12 @@ class SubscriptionService: ObservableObject {
                 let storeProducts = try await Product.products(for: productIDs)
                 products = Array(storeProducts)
                 if products.isEmpty {
-                    print("⚠️ No products loaded. Check StoreKit configuration.")
+                    AppLogger.subscription.warning("⚠️ No products loaded. Check StoreKit configuration.")
                 } else {
-                    print("✅ Loaded \(products.count) products")
+                    AppLogger.subscription.info("✅ Loaded \(self.products.count) products")
                 }
             } catch {
-                print("❌ Failed to load products: \(error)")
+                AppLogger.subscription.error("❌ Failed to load products: \(String(describing: error), privacy: .public)")
                 lastError = "无法加载订阅产品"
             }
         }
@@ -256,7 +257,7 @@ class SubscriptionService: ObservableObject {
         status = .subscribed(tier)
         permissions = FeaturePermissions.forTier(tier)
         lastError = nil
-        print("✅ Simulated subscription: \(tier.rawValue)")
+        AppLogger.subscription.info("✅ Simulated subscription: \(tier.rawValue, privacy: .public)")
     }
 
     // MARK: - 恢复购买

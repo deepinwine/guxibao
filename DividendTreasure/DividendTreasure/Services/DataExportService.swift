@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import os
 import SwiftData
 
 struct DataExportService {
@@ -17,17 +18,19 @@ struct DataExportService {
         var csv = "代码,名称,市场,资产类型,行业,数量,成本价,现价,年度每股股息,预计派息月份,市值,年度股息,股息率\n"
 
         for holding in holdings {
+            // 按 RFC 4180 转义每个字段：含逗号/引号/换行的字段需用双引号包裹，
+            // 内部双引号用两个双引号转义，否则会破坏 CSV 列对齐。
             let row = [
-                holding.symbol,
-                holding.name,
-                holding.market,
-                holding.assetType,
-                holding.industry,
+                escapeCSVField(holding.symbol),
+                escapeCSVField(holding.name),
+                escapeCSVField(holding.market),
+                escapeCSVField(holding.assetType),
+                escapeCSVField(holding.industry),
                 String(format: "%.0f", holding.quantity),
                 String(format: "%.2f", holding.averageCost),
                 String(format: "%.2f", holding.currentPrice),
                 String(format: "%.4f", holding.annualDividendPerShare),
-                holding.expectedDividendMonths,
+                escapeCSVField(holding.expectedDividendMonths),
                 String(format: "%.2f", holding.marketValue),
                 String(format: "%.2f", holding.annualDividend),
                 String(format: "%.4f", holding.dividendYield)
@@ -43,7 +46,7 @@ struct DataExportService {
             try csv.write(to: fileURL, atomically: true, encoding: .utf8)
             return fileURL
         } catch {
-            print("Failed to export CSV: \(error)")
+            AppLogger.data.error("Failed to export CSV: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -91,7 +94,7 @@ struct DataExportService {
             try jsonData.write(to: fileURL)
             return fileURL
         } catch {
-            print("Failed to export JSON: \(error)")
+            AppLogger.data.error("Failed to export JSON: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -118,7 +121,14 @@ struct DataExportService {
 
             let importedHoldings = try decoder.decode([HoldingImport].self, from: data)
 
+            // 收集该组合下已存在的 symbol，避免重复导入产生重复持仓。
+            var existingSymbols = Set(portfolio.holdings.map { $0.symbol })
+            var insertedCount = 0
+
             for importData in importedHoldings {
+                // 跳过该组合下已存在的相同 symbol，防止重复导入
+                guard !existingSymbols.contains(importData.symbol) else { continue }
+
                 let holding = Holding(
                     symbol: importData.symbol,
                     name: importData.name,
@@ -133,13 +143,26 @@ struct DataExportService {
                 )
                 holding.portfolio = portfolio
                 context.insert(holding)
+                existingSymbols.insert(importData.symbol)
+                insertedCount += 1
             }
 
-            return importedHoldings.count
+            return insertedCount
         } catch {
-            print("Failed to import holdings: \(error)")
+            AppLogger.data.error("Failed to import holdings: \(String(describing: error), privacy: .public)")
             return 0
         }
+    }
+
+    // MARK: - CSV 辅助
+
+    /// 按 RFC 4180 转义 CSV 字段：含逗号 / 引号 / 换行符的字段需用双引号包裹，
+    /// 内部的双引号用两个连续双引号转义。
+    private static func escapeCSVField(_ field: String) -> String {
+        let needsQuoting = field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r")
+        guard needsQuoting else { return field }
+        let escaped = field.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
     }
 }
 
@@ -149,6 +172,9 @@ extension DateFormatter {
     static let fileNameDate: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
+        // 固定 locale/timeZone，避免在非公历日历的设备上生成意外的文件名
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
         return formatter
     }()
 }

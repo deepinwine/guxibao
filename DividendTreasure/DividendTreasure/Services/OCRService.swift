@@ -22,8 +22,27 @@ struct OCRStockCandidate: Identifiable {
     let symbol: String?
     let quantity: Double?
     let currentPrice: Double?
+    let costPrice: Double?
     let marketValue: Double?
     let confidence: Double
+
+    init(
+        name: String?,
+        symbol: String?,
+        quantity: Double?,
+        currentPrice: Double?,
+        costPrice: Double? = nil,
+        marketValue: Double?,
+        confidence: Double
+    ) {
+        self.name = name
+        self.symbol = symbol
+        self.quantity = quantity
+        self.currentPrice = currentPrice
+        self.costPrice = costPrice
+        self.marketValue = marketValue
+        self.confidence = confidence
+    }
 
     var displayName: String {
         if let name = name, let symbol = symbol {
@@ -42,6 +61,9 @@ struct OCRStockCandidate: Identifiable {
 class OCRService {
 
     static let shared = OCRService()
+    private let parser = OCRHoldingTableParser { keyword in
+        StockDataService.shared.searchStockSync(keyword: keyword).first
+    }
 
     private init() {}
 
@@ -66,15 +88,17 @@ class OCRService {
                 return
             }
 
-            // 提取识别的文本
-            let recognizedTexts = observations.compactMap { observation in
-                observation.topCandidates(1).first?.string
+            let textObservations = observations.compactMap { observation -> OCRTextObservation? in
+                guard let candidate = observation.topCandidates(1).first else { return nil }
+                return OCRTextObservation(
+                    text: candidate.string,
+                    boundingBox: observation.boundingBox
+                )
             }
 
-            let fullText = recognizedTexts.joined(separator: "\n")
-
-            // 解析股票信息
-            let candidates = self.parseStockInfo(from: recognizedTexts)
+            let orderedTexts = self.parser.orderedTexts(from: textObservations)
+            let fullText = orderedTexts.joined(separator: "\n")
+            let candidates = self.parser.parse(observations: textObservations)
 
             let result = OCRResult(
                 recognizedText: fullText,
@@ -101,166 +125,6 @@ class OCRService {
                 }
             }
         }
-    }
-
-    /// 解析股票信息
-    private func parseStockInfo(from texts: [String]) -> [OCRStockCandidate] {
-        var candidates: [OCRStockCandidate] = []
-
-        // 逐行分析文本
-        for (index, text) in texts.enumerated() {
-            let cleanText = text.trimmingCharacters(in: .whitespaces)
-
-            // 尝试提取股票名称
-            if let stockName = extractStockName(from: cleanText) {
-                // 使用StockDataService搜索股票
-                let searchResults = StockDataService.shared.searchStockSync(keyword: stockName)
-
-                if let firstResult = searchResults.first {
-                    // 找到匹配的股票
-                    let symbol = firstResult.symbol
-                    let quantity = extractQuantity(from: texts, at: index)
-                    let price = extractPrice(from: texts, at: index)
-                    let marketValue = extractMarketValue(from: texts, at: index)
-
-                    candidates.append(OCRStockCandidate(
-                        name: stockName,
-                        symbol: symbol,
-                        quantity: quantity,
-                        currentPrice: price,
-                        marketValue: marketValue,
-                        confidence: 0.9
-                    ))
-                } else {
-                    // 没找到匹配，使用原始名称
-                    candidates.append(OCRStockCandidate(
-                        name: stockName,
-                        symbol: nil,
-                        quantity: extractQuantity(from: texts, at: index),
-                        currentPrice: extractPrice(from: texts, at: index),
-                        marketValue: extractMarketValue(from: texts, at: index),
-                        confidence: 0.5
-                    ))
-                }
-            }
-
-            // 尝试提取股票代码（6位数字）
-            if let symbol = extractStockSymbol(from: cleanText) {
-                // 检查是否已经添加过
-                if !candidates.contains(where: { $0.symbol == symbol }) {
-                    candidates.append(OCRStockCandidate(
-                        name: nil,
-                        symbol: symbol,
-                        quantity: extractQuantity(from: texts, at: index),
-                        currentPrice: extractPrice(from: texts, at: index),
-                        marketValue: extractMarketValue(from: texts, at: index),
-                        confidence: 0.7
-                    ))
-                }
-            }
-        }
-
-        return candidates
-    }
-
-    /// 提取股票名称（中文）
-    private func extractStockName(from text: String) -> String? {
-        // 匹配2-10个中文字符
-        let pattern = "[\\u4e00-\\u9fa5]{2,10}"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range, in: text) else {
-            return nil
-        }
-
-        let name = String(text[range])
-
-        // 过滤常见的非股票名称
-        let blackList = ["持仓", "市值", "成本", "盈亏", "可用", "冻结", "总计", "合计", "股票", "代码", "名称", "数量", "价格", "成本价", "现价", "市值"]
-        if blackList.contains(name) {
-            return nil
-        }
-
-        return name
-    }
-
-    /// 提取股票代码（6位数字）
-    private func extractStockSymbol(from text: String) -> String? {
-        // 匹配6位数字
-        let pattern = "\\d{6}"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range, in: text) else {
-            return nil
-        }
-
-        return String(text[range])
-    }
-
-    /// 提取数量
-    private func extractQuantity(from texts: [String], at index: Int) -> Double? {
-        // 查找附近的数字
-        let searchRange = max(0, index - 2)...min(texts.count - 1, index + 2)
-        for i in searchRange {
-            let text = texts[i]
-            // 匹配整数或小数
-            if let number = extractNumber(from: text) {
-                // 通常数量是整数
-                if number.truncatingRemainder(dividingBy: 1) == 0 && number >= 100 {
-                    return number
-                }
-            }
-        }
-        return nil
-    }
-
-    /// 提取价格
-    private func extractPrice(from texts: [String], at index: Int) -> Double? {
-        // 查找附近的数字
-        let searchRange = max(0, index - 2)...min(texts.count - 1, index + 2)
-        for i in searchRange {
-            let text = texts[i]
-            if let number = extractNumber(from: text) {
-                // 通常价格是小数且小于1000
-                if number < 1000 && number > 0.1 {
-                    return number
-                }
-            }
-        }
-        return nil
-    }
-
-    /// 提取市值
-    private func extractMarketValue(from texts: [String], at index: Int) -> Double? {
-        // 查找附近的数字（通常市值较大）
-        let searchRange = max(0, index - 2)...min(texts.count - 1, index + 2)
-        for i in searchRange {
-            let text = texts[i]
-            // 匹配"万"或"亿"
-            if text.contains("万") {
-                if let number = extractNumber(from: text) {
-                    return number * 10000
-                }
-            } else if text.contains("亿") {
-                if let number = extractNumber(from: text) {
-                    return number * 100000000
-                }
-            }
-        }
-        return nil
-    }
-
-    /// 从文本中提取数字
-    private func extractNumber(from text: String) -> Double? {
-        let pattern = "\\d+\\.?\\d*"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range, in: text) else {
-            return nil
-        }
-
-        let numberStr = String(text[range])
-        return Double(numberStr)
     }
 }
 

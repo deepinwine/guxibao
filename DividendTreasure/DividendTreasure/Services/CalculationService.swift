@@ -66,25 +66,6 @@ struct CalculationService {
         return min(currentDividend / targetDividend, 1.0)
     }
 
-    // MARK: - 收藏股息率计算
-
-    /// 计算当前股息率（收藏）
-    static func currentYield(dividendPerShare: Double, currentPrice: Double) -> Double {
-        return dividendYield(dividendPerShare: dividendPerShare, currentPrice: currentPrice)
-    }
-
-    /// 计算目标买入价
-    static func targetBuyPrice(dividendPerShare: Double, targetYield: Double) -> Double {
-        guard targetYield > 0 else { return 0 }
-        return dividendPerShare / targetYield
-    }
-
-    /// 计算目标卖出价
-    static func targetSellPrice(dividendPerShare: Double, targetYield: Double) -> Double {
-        guard targetYield > 0 else { return 0 }
-        return dividendPerShare / targetYield
-    }
-
     // MARK: - 排行榜计算
 
     /// 获取市值排行榜

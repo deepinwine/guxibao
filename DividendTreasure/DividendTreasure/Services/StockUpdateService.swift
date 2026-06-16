@@ -4,10 +4,15 @@
 //
 //  股票数据更新服务 - 批量更新持仓的股息率
 //
+//  注意：SwiftData 的 ModelContext / @Model 对象不是 Sendable，不能跨 actor 并发访问。
+//  因此整个服务标记为 @MainActor，所有对 context / holding 的读写都在主线程完成。
+//  网络请求通过 await 挂起（实际 IO 在 URLSession 后台线程），await 期间不会阻塞主线程。
+//
 
 import Foundation
 import Combine
 import SwiftData
+import os
 
 // MARK: - 更新状态
 
@@ -33,6 +38,7 @@ enum UpdateStatus {
 
 // MARK: - 更新服务
 
+@MainActor
 class StockUpdateService: ObservableObject {
     static let shared = StockUpdateService()
 
@@ -51,82 +57,75 @@ class StockUpdateService: ObservableObject {
 
     /// 批量更新所有持仓的股票数据
     func updateAllHoldings(in context: ModelContext) async {
-        await MainActor.run {
-            updateStatus = .updating(progress: 0)
-        }
+        updateStatus = .updating(progress: 0)
 
-        // 获取所有持仓
+        // 获取所有持仓（主线程安全访问 ModelContext）
         let descriptor = FetchDescriptor<Holding>()
 
+        let holdings: [Holding]
         do {
-            let holdings = try context.fetch(descriptor)
-
-            guard !holdings.isEmpty else {
-                await MainActor.run {
-                    updateStatus = .completed(updatedCount: 0)
-                }
-                return
-            }
-
-            var updatedCount = 0
-            let total = holdings.count
-
-            for (index, holding) in holdings.enumerated() {
-                // 更新单个持仓
-                await updateHoldingData(holding)
-
-                updatedCount += 1
-
-                // 更新进度
-                let progress = Double(index + 1) / Double(total)
-                await MainActor.run {
-                    updateStatus = .updating(progress: progress)
-                }
-
-                // 添加延迟，避免请求过快
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
-            }
-
-            // 保存更新时间
-            saveLastUpdateTime()
-
-            await MainActor.run {
-                updateStatus = .completed(updatedCount: updatedCount)
-            }
-
+            holdings = try context.fetch(descriptor)
         } catch {
-            await MainActor.run {
-                updateStatus = .failed(error: error)
-            }
+            updateStatus = .failed(error: error)
+            return
         }
+
+        guard !holdings.isEmpty else {
+            updateStatus = .completed(updatedCount: 0)
+            return
+        }
+
+        // 在主线程读取每个持仓的 symbol/market 等只读字段，构建待更新任务列表。
+        // 这样网络请求阶段不再触碰 @Model 对象，避免 await 跨越时的并发风险。
+        let updateTasks: [(holding: Holding, marketCode: String)] = holdings.map { holding in
+            (holding, getMarketCode(for: holding.market))
+        }
+
+        let total = updateTasks.count
+
+        for (index, task) in updateTasks.enumerated() {
+            await updateHoldingData(task.holding, marketCode: task.marketCode)
+
+            updateStatus = .updating(progress: Double(index + 1) / Double(total))
+
+            // 添加延迟，避免请求过快
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+        }
+
+        // 保存更新时间
+        saveLastUpdateTime()
+
+        updateStatus = .completed(updatedCount: total)
     }
 
     /// 更新单个持仓数据
-    private func updateHoldingData(_ holding: Holding) async {
-        let marketCode = getMarketCode(for: holding.market)
+    /// - 网络请求在后台进行（StockDataService 内部），await 期间不阻塞主线程；
+    /// - 对 holding 的写入在主线程完成（本类为 @MainActor）。
+    private func updateHoldingData(_ holding: Holding, marketCode: String) async {
+        // 在主线程读取 symbol，避免持有对 @Model 的引用跨越 await
+        let symbol = holding.symbol
 
+        let stockData: StockData
         do {
-            let stockData = try await StockDataService.shared.fetchStockData(
-                symbol: holding.symbol,
+            stockData = try await StockDataService.shared.fetchStockData(
+                symbol: symbol,
                 marketCode: marketCode
             )
-
-            await MainActor.run {
-                // 更新持仓数据
-                if stockData.currentPrice > 0 {
-                    holding.currentPrice = stockData.currentPrice
-                }
-
-                if stockData.latestDividend > 0 {
-                    holding.annualDividendPerShare = stockData.latestDividend
-                }
-
-                holding.updatedAt = Date()
-            }
-
         } catch {
-            print("Failed to update holding \(holding.symbol): \(error)")
+            AppLogger.network.error("Failed to update holding \(symbol, privacy: .public): \(String(describing: error), privacy: .public)")
+            return
         }
+
+        // 更新持仓数据（主线程，安全）
+        if stockData.currentPrice > 0 {
+            holding.currentPrice = stockData.currentPrice
+        }
+
+        if stockData.latestDividend > 0 {
+            holding.annualDividendPerShare = stockData.latestDividend
+        }
+
+        holding.updatedAt = Date()
     }
 
     /// 获取市场代码
