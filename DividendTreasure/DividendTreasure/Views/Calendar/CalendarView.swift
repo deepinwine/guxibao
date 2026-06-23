@@ -13,6 +13,8 @@ struct CalendarView: View {
 
     @State private var selectedDate = Date()
     @State private var displayedMonth = Date()
+    // 缓存股息事件，避免在 body 中每次渲染都全量重算（原实现每次 render 调用 2+ 次）。
+    @State private var cachedEvents: [DividendCalendarEvent] = []
 
     var body: some View {
         NavigationStack {
@@ -24,7 +26,7 @@ struct CalendarView: View {
                 CalendarGrid(
                     displayedMonth: displayedMonth,
                     selectedDate: $selectedDate,
-                    dividendEvents: getDividendEvents()
+                    dividendEvents: cachedEvents
                 )
 
                 // 选中日期的股息详情
@@ -35,6 +37,14 @@ struct CalendarView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("日历")
+            .task {
+                // 首次加载
+                cachedEvents = computeDividendEvents()
+            }
+            .onChange(of: displayedMonth) { _, _ in
+                // 切换月份时重算（按所看月份的年份生成事件）
+                cachedEvents = computeDividendEvents()
+            }
         }
     }
 
@@ -42,17 +52,18 @@ struct CalendarView: View {
         portfolios.flatMap { $0.holdings }
     }
 
-    private func getDividendEvents() -> [DividendCalendarEvent] {
+    private func computeDividendEvents() -> [DividendCalendarEvent] {
         var events: [DividendCalendarEvent] = []
 
         for holding in allHoldings {
             let months = parseDividendMonths(holding.expectedDividendMonths)
             let calendar = Calendar.current
-            let currentYear = calendar.component(.year, from: Date())
+            // 事件年份跟随当前查看的月份，使切换到任意月份都能看到对应事件
+            let eventYear = calendar.component(.year, from: displayedMonth)
 
             for month in months {
                 var components = DateComponents()
-                components.year = currentYear
+                components.year = eventYear
                 components.month = month
                 components.day = 15
 
@@ -74,7 +85,7 @@ struct CalendarView: View {
 
     private func getEventsForDate(_ date: Date) -> [DividendCalendarEvent] {
         let calendar = Calendar.current
-        return getDividendEvents().filter { event in
+        return cachedEvents.filter { event in
             calendar.isDate(event.date, inSameDayAs: date)
         }
     }

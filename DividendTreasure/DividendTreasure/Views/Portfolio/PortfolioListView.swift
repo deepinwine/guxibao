@@ -118,6 +118,7 @@ struct PortfolioRow: View {
 
 struct PortfolioDetailView: View {
     let portfolio: Portfolio
+    @Environment(\.modelContext) private var modelContext
     @State private var showingAddHolding = false
     @State private var showTableView = false
 
@@ -229,7 +230,7 @@ struct PortfolioDetailView: View {
     private func deleteHoldings(offsets: IndexSet) {
         withAnimation {
             for index in offsets {
-                portfolio.holdings[index].portfolio = nil
+                modelContext.delete(portfolio.holdings[index])
             }
         }
     }

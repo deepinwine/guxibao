@@ -14,7 +14,7 @@ struct StrategyTemplateView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack {
                 Text("策略模板")
                     .font(.headline)

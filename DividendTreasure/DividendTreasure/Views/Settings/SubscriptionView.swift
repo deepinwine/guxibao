@@ -7,9 +7,10 @@
 
 import SwiftUI
 import StoreKit
+import os
 
 struct SubscriptionView: View {
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
     @State private var isPurchasing = false
     @State private var showError = false
     @State private var errorMessage = ""
@@ -66,7 +67,7 @@ struct SubscriptionView: View {
 // MARK: - 当前订阅卡片
 
 struct CurrentSubscriptionCard: View {
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -114,7 +115,7 @@ struct CurrentSubscriptionCard: View {
 // MARK: - 免费版限制卡片
 
 struct FreeVersionLimitCard: View {
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -161,7 +162,7 @@ struct LimitRow: View {
 // MARK: - 订阅选项卡片
 
 struct SubscriptionOptionsCard: View {
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
     @Binding var isPurchasing: Bool
 
     var body: some View {
@@ -210,7 +211,9 @@ struct SubscriptionOptionRow: View {
     let tier: SubscriptionTier
     @Binding var isPurchasing: Bool
 
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
+    @State private var showError = false
+    @State private var errorMessage = ""
 
     var body: some View {
         Button(action: { purchase() }) {
@@ -251,6 +254,11 @@ struct SubscriptionOptionRow: View {
             .cornerRadius(8)
         }
         .buttonStyle(.plain)
+        .alert("购买失败", isPresented: $showError) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
     }
 
     private func purchase() {
@@ -258,11 +266,21 @@ struct SubscriptionOptionRow: View {
             isPurchasing = true
             do {
                 let success = try await subscriptionService.purchase(tier)
-                if !success && subscriptionService.lastError != nil {
-                    // 显示错误（用户取消不显示）
+                if !success {
+                    // 购买失败（非用户主动取消）时显示错误提示
+                    let msg = subscriptionService.lastError ?? "购买未完成，请稍后重试"
+                    if !msg.localizedCaseInsensitiveContains("cancel") {
+                        errorMessage = msg
+                        showError = true
+                    }
                 }
             } catch {
-                print("Purchase failed: \(error)")
+                let msg = error.localizedDescription
+                if !msg.localizedCaseInsensitiveContains("cancel") {
+                    errorMessage = msg
+                    showError = true
+                }
+                AppLogger.subscription.error("Purchase failed: \(String(describing: error), privacy: .public)")
             }
             isPurchasing = false
         }
@@ -272,7 +290,7 @@ struct SubscriptionOptionRow: View {
 // MARK: - 开发测试区域
 
 struct DevTestSection: View {
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

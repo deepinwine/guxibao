@@ -43,8 +43,9 @@ struct PassiveIncomeGoalView: View {
     @AppStorage("expense_shopping") private var expenseShopping: Double = 0  // 购物
 
     @State private var customExpenses: [ExpenseItem] = []
-    @State private var manualGoalAmount: Double = 0
-    @State private var useManualGoal = false
+    // 手动目标金额与是否启用均需持久化，否则视图重建（如关闭重开）后用户设置丢失。
+    @AppStorage("manualGoalAmount") private var manualGoalAmount: Double = 0
+    @AppStorage("useManualGoal") private var useManualGoal = false
 
     private let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()

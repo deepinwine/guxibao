@@ -20,6 +20,8 @@ struct StockSearchView: View {
     @State private var stockDetails: [String: StockData] = [:]
     // 存储每只股票的加载状态
     @State private var loadingStates: [String: Bool] = [:]
+    // 搜索请求序号，用于丢弃过期回调结果，避免旧搜索覆盖新搜索（竞态防护）
+    @State private var currentSearchToken: Int = 0
 
     let onSelect: (StockSearchResult, StockData?) -> Void
 
@@ -87,6 +89,10 @@ struct StockSearchView: View {
     private func performSearch() {
         guard !searchText.isEmpty else { return }
 
+        // 自增 token，回调时校验：若 token 已变（用户又发起新搜索），丢弃本次过期结果
+        currentSearchToken += 1
+        let token = currentSearchToken
+
         isSearching = true
         errorMessage = ""
         stockDetails = [:]
@@ -94,6 +100,8 @@ struct StockSearchView: View {
 
         StockDataService.shared.searchStock(keyword: searchText) { result in
             DispatchQueue.main.async {
+                // 若用户已发起新搜索，丢弃本次过期结果
+                guard token == currentSearchToken else { return }
                 isSearching = false
 
                 switch result {
@@ -101,7 +109,7 @@ struct StockSearchView: View {
                     searchResults = stocks
                     // 只预加载前几条，避免一次搜索后触发过多并发详情请求。
                     for stock in stocks.prefix(8) {
-                        loadStockDetail(for: stock)
+                        loadStockDetail(for: stock, token: token)
                     }
                 case .failure(let error):
                     errorMessage = error.errorDescription ?? "未知错误"
@@ -112,12 +120,13 @@ struct StockSearchView: View {
     }
 
     // 新增：加载单只股票的详细信息
-    private func loadStockDetail(for result: StockSearchResult) {
+    private func loadStockDetail(for result: StockSearchResult, token: Int) {
         let symbol = result.symbol
         loadingStates[symbol] = true
 
         StockDataService.shared.fetchStockData(symbol: result.symbol, marketCode: result.marketCode) { stockDataResult in
             DispatchQueue.main.async {
+                guard token == currentSearchToken else { return }
                 loadingStates[symbol] = false
 
                 if case .success(let data) = stockDataResult {

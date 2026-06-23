@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 
 struct DataExportView: View {
     @Query private var portfolios: [Portfolio]
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
     @State private var showingShareSheet = false
     @State private var exportURL: URL?
     @State private var showingUpgradePrompt = false
@@ -53,7 +53,10 @@ struct DataExportView: View {
             }
         }
         .navigationTitle("数据导入导出")
-        .sheet(isPresented: $showingShareSheet) {
+        .sheet(isPresented: $showingShareSheet, onDismiss: {
+            // 分享面板关闭后清理导出的临时文件，避免 temp 目录累积泄漏
+            cleanupExportFile()
+        }) {
             if let url = exportURL {
                 ShareSheet(items: [url])
             }
@@ -91,6 +94,14 @@ struct DataExportView: View {
         if let url = DataExportService.exportHoldingsToJSON(allHoldings) {
             exportURL = url
             showingShareSheet = true
+        }
+    }
+
+    /// 分享面板关闭后删除导出的临时文件，避免 temp 目录持续累积泄漏
+    private func cleanupExportFile() {
+        if let url = exportURL {
+            try? FileManager.default.removeItem(at: url)
+            exportURL = nil
         }
     }
 }
@@ -131,15 +142,29 @@ struct DataImportView: View {
                 print("Failed to import: \(error)")
             }
         }
-        .alert("导入成功", isPresented: $showingSuccess) {
+        .alert("导入完成", isPresented: $showingSuccess) {
             Button("确定", role: .cancel) { }
         } message: {
-            Text("已成功导入 \(importedCount) 个持仓")
+            Text(importedCount > 0
+                 ? "已成功导入 \(importedCount) 个持仓"
+                 : "没有导入任何持仓（可能数据为空或股票代码已存在）")
         }
     }
 
     private func importData(from url: URL) {
-        guard let portfolio = portfolios.first else { return }
+        guard let portfolio = portfolios.first else {
+            importedCount = 0
+            showingSuccess = true
+            return
+        }
+
+        // .fileImporter 返回的 URL 是安全作用域的，必须先获取访问权限才能读取，否则真机上会失败。
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
 
         let count = DataExportService.importHoldingsFromJSON(from: url, to: portfolio, in: modelContext)
         importedCount = count

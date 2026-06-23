@@ -36,6 +36,11 @@ struct WatchlistView: View {
             }
             .navigationTitle("我的收藏")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { showingNotificationSettings = true }) {
+                        Image(systemName: "bell")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: { showingAddItem = true }) {
                         Image(systemName: "plus")

@@ -131,7 +131,8 @@ struct HoldingFormView: View {
                 if let qty = Double(quantity),
                    let cost = Double(averageCost),
                    let price = Double(currentPrice),
-                   let dividend = Double(annualDividendPerShare) {
+                   let dividend = Double(annualDividendPerShare),
+                   qty > 0, price > 0 {  // 防止除零/负数导致 inf/nan
 
                     Section("计算预览") {
                         HStack {

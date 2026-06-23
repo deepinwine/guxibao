@@ -14,7 +14,7 @@ struct TradeOCRView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack {
                 Text("截图识别")
                     .font(.headline)

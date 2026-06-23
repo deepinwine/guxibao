@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import os
 
 struct GridTradingView: View {
     // MARK: - Properties
@@ -14,7 +15,7 @@ struct GridTradingView: View {
     let holding: Holding
 
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
 
     @State private var gridLevels: [GridTradingLevel] = []
     @State private var showQuickGenerate = false
@@ -38,6 +39,9 @@ struct GridTradingView: View {
 
                 // 档位列表
                 gridLevelsSection
+
+                // 底部按钮（交易记录 / 截图识别）
+                bottomButtons
             }
             .padding()
         }
@@ -146,7 +150,13 @@ struct GridTradingView: View {
             }
 
             actionButton(title: "手动添加", icon: "plus.circle.fill", color: .green) {
-                showAddLevel = true
+                // 非会员档位数受限
+                if subscriptionService.canAddGridLevel(currentCount: gridLevels.count) {
+                    showAddLevel = true
+                } else {
+                    premiumFeature = "更多档位"
+                    showPremiumPrompt = true
+                }
             }
         }
     }
@@ -183,7 +193,7 @@ struct GridTradingView: View {
             if gridLevels.isEmpty {
                 emptyStateView
             } else {
-                ForEach(gridLevels.sorted(by: { $0.price > $1.price }), id: \.id) { level in
+                ForEach(gridLevels, id: \.id) { level in
                     GridLevelRow(level: level)
                 }
             }
@@ -251,9 +261,10 @@ struct GridTradingView: View {
             }
         )
         do {
-            gridLevels = try modelContext.fetch(descriptor)
+            // 存入时即按价格降序排列，避免在 body 中每次渲染都重复排序。
+            gridLevels = try modelContext.fetch(descriptor).sorted { $0.price > $1.price }
         } catch {
-            print("Failed to load grid levels: \(error)")
+            AppLogger.data.error("Failed to load grid levels: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -265,7 +276,14 @@ struct GridTradingView: View {
     }
 
     private func addLevels(_ levels: [GridTradingLevel]) {
-        for level in levels {
+        // 非会员档位数受限：只保留权限允许的档位数，超出部分忽略
+        let maxAllowed = subscriptionService.canAddGridLevel(currentCount: gridLevels.count)
+            ? max(subscriptionService.permissions.gridTradingLevels - gridLevels.count, 0)
+            : 0
+        let freeTierLimited = subscriptionService.permissions.gridTradingLevels != Int.max
+        let levelsToInsert = freeTierLimited ? Array(levels.prefix(maxAllowed)) : levels
+
+        for level in levelsToInsert {
             level.holding = holding
             modelContext.insert(level)
         }
@@ -316,7 +334,7 @@ struct GridLevelRow: View {
 // MARK: - Preview
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         GridTradingView(holding: Holding(
             symbol: "601398",
             name: "工商银行",

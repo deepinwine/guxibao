@@ -13,7 +13,7 @@ struct TradeRecordView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack {
                 Text("交易记录")
                     .font(.headline)

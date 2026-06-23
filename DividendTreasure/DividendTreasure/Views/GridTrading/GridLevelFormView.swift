@@ -17,8 +17,14 @@ struct GridLevelFormView: View {
     @State private var direction: String = "买入"
     @State private var note: String = ""
 
+    // 价格与数量必须为正数
+    private var isInputValid: Bool {
+        guard let p = Double(price), let q = Double(quantity) else { return false }
+        return p > 0 && q > 0
+    }
+
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section("档位信息") {
                     Picker("方向", selection: $direction) {
@@ -59,7 +65,8 @@ struct GridLevelFormView: View {
                             dismiss()
                         }
                     }
-                    .disabled(price.isEmpty || quantity.isEmpty)
+                    // 价格与数量必须为正数，避免 0/负数破坏后续股息率计算
+                    .disabled(!isInputValid)
                 }
             }
         }

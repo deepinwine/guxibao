@@ -161,12 +161,15 @@ struct QuickGenerateView: View {
 
     private func updatePreview() {
         let step = Double(percentStep) ?? 0
-        let count = Int(levelCount) ?? 0
+        var count = Int(levelCount) ?? 0
 
         guard step > 0, count > 0 else {
             previewLevels = []
             return
         }
+
+        // 限制预览档位上限，避免输入过大值导致卡顿
+        count = min(count, 50)
 
         let qty = Double(baseQuantity)
         previewLevels = service.generateLevelsByPercent(

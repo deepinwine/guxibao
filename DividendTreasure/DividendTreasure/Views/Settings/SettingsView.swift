@@ -11,7 +11,14 @@ import SwiftData
 struct SettingsView: View {
     @AppStorage("annualPassiveIncomeGoal") private var annualPassiveIncomeGoal: Double = 50000
     @AppStorage("defaultCurrency") private var defaultCurrency: String = "CNY"
-    @StateObject private var subscriptionService = SubscriptionService.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
+
+    // 读取 Bundle 中的版本号，避免硬编码导致版本与构建不同步
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "\(version) (\(build))"
+    }
 
     var body: some View {
         NavigationStack {
@@ -87,7 +94,7 @@ struct SettingsView: View {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("1.0.0")
+                        Text(appVersion)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -120,7 +127,7 @@ struct DisclaimerView: View {
 
                 5. 本应用不会接入任何券商账户，不会执行任何交易操作。
 
-                6. 用户数据通过 iCloud 同步，数据安全由 Apple iCloud 服务保障。
+                6. 用户数据默认保存在本地设备。订阅会员后可启用 iCloud 多设备同步，数据安全由 Apple iCloud 服务保障。
                 """)
                     .font(.body)
                     .foregroundStyle(.secondary)
