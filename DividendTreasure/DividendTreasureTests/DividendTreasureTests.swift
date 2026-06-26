@@ -355,3 +355,63 @@ struct DividendTreasureTests {
         }
     }
 }
+
+// MARK: - 股价/股息解析测试（基于真实接口返回数据）
+
+/// 用东财 push2 真实返回的 JSON 验证解析：
+/// - f43 价格除数必须是 100（曾误用 1000 导致股价缩小到 1/10）
+/// - 解出的股价应与真实价位吻合
+struct StockDataParsingTests {
+    private let service = StockDataService.shared
+
+    /// 招行 600036：真实股价约 36 元，f43=3600
+    @Test func eastMoneyPriceDivisorIsHundred() throws {
+        // 2026-06-23 实际抓取的真实返回
+        let json = """
+        {"rc":0,"rt":4,"data":{"f43":3600,"f58":"招商银行","f162":600,"f173":3.37}}
+        """.data(using: .utf8)!
+
+        let stock = try #require(service.parseEastMoneyStockData(json, symbol: "600036", marketCode: "1"))
+
+        // f43=3600, ÷100=36.00（而非旧的÷1000=3.6）
+        #expect(abs(stock.currentPrice - 36.00) < 0.01, "招行股价应约36元，验证f43除数为100")
+        #expect(stock.name == "招商银行")
+        #expect(stock.market == "A股")
+    }
+
+    /// 多只不同价位股票交叉验证除数 100
+    @Test func priceDivisorAcrossPriceLevels() throws {
+        // 茅台 f43=116863 → 1168.63；工行 f43=715 → 7.15；平安 f43=1023 → 10.23
+        let cases: [(code: String, f43: Int, expectedPrice: Double)] = [
+            ("600519", 116863, 1168.63),  // 茅台
+            ("601398", 715, 7.15),        // 工行
+            ("000001", 1023, 10.23),      // 平安
+        ]
+        for c in cases {
+            let json = "{\"data\":{\"f43\":\(c.f43),\"f58\":\"x\",\"f162\":0,\"f173\":0}}".data(using: .utf8)!
+            let stock = try #require(service.parseEastMoneyStockData(json, symbol: c.code, marketCode: "1"))
+            #expect(abs(stock.currentPrice - c.expectedPrice) < 0.01,
+                    "\(c.code) f43=\(c.f43) 应为 \(c.expectedPrice)")
+        }
+    }
+
+    /// 验证 push2 不再返回不可靠的 f173 股息（应留空由 datacenter 补充）
+    @Test func push2DoesNotReturnUnreliableDividend() throws {
+        let json = """
+        {"data":{"f43":3600,"f58":"招商银行","f162":600,"f173":3.37}}
+        """.data(using: .utf8)!
+        let stock = try #require(service.parseEastMoneyStockData(json, symbol: "600036", marketCode: "1"))
+        // push2 的 f173=3.37 不可靠，不应作为股息返回；latestDividend 应为 0（由 datacenter 单独取）
+        #expect(stock.latestDividend == 0, "push2 股息不可靠，应留空由 datacenter 补充")
+    }
+
+    /// 验证美股 secid 路径也能解析价格
+    @Test func usStockPriceParsing() throws {
+        let json = """
+        {"data":{"f43":296420,"f58":"苹果","f162":0,"f173":0}}
+        """.data(using: .utf8)!
+        let stock = try #require(service.parseEastMoneyStockData(json, symbol: "AAPL", marketCode: "105"))
+        #expect(abs(stock.currentPrice - 2964.20) < 0.01, "AAPL 股价应约296美元")
+        #expect(stock.market == "美股")
+    }
+}

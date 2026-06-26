@@ -67,6 +67,10 @@ class StockDataService {
     /// 东方财富股票详情API
     private let eastMoneyStockURL = "https://push2.eastmoney.com/api/qt/stock/get"
 
+    /// 东方财富分红明细API（权威股息数据源）。
+    /// 返回每次分红的记录，含 PRETAX_BONUS_RMB（每10股派息税前，元）。
+    private let eastMoneyDividendDataURL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
     /// 东方财富分红数据API
     private let eastMoneyDividendURL = "https://emweb.eastmoney.com/PC_HSF10/BonusFinancing/PageAjax"
 
@@ -225,11 +229,26 @@ class StockDataService {
         completion: @escaping (Result<StockData, StockDataError>) -> Void
     ) {
         session.dataTask(with: request) { data, response, error in
-            // 成功解析则返回
+            // 成功解析价格则继续补充股息数据
             if error == nil, let data = data,
-               let stockData = self.parseEastMoneyStockData(data, symbol: symbol, marketCode: marketCode) {
-                self.setCachedStock(stockData, forKey: cacheKey)
-                completion(.success(stockData))
+               let priceData = self.parseEastMoneyStockData(data, symbol: symbol, marketCode: marketCode) {
+                // push2 仅提供可靠价格；股息由 datacenter 分红明细接口单独获取后补充
+                self.fetchTTMDividend(symbol: symbol, marketCode: marketCode) { ttmDividend in
+                    var enriched = priceData
+                    if ttmDividend > 0 {
+                        enriched = StockData(
+                            symbol: priceData.symbol,
+                            name: priceData.name,
+                            market: priceData.market,
+                            marketCode: priceData.marketCode,
+                            currentPrice: priceData.currentPrice,
+                            latestDividend: ttmDividend,
+                            dividendYield: priceData.currentPrice > 0 ? ttmDividend / priceData.currentPrice : 0
+                        )
+                    }
+                    self.setCachedStock(enriched, forKey: cacheKey)
+                    completion(.success(enriched))
+                }
                 return
             }
 
@@ -399,7 +418,8 @@ class StockDataService {
     // MARK: - 解析方法
 
     /// 解析东方财富股票数据
-    private func parseEastMoneyStockData(_ data: Data, symbol: String, marketCode: String) -> StockData? {
+    /// 解析东方财富股票数据（internal 以便单元测试验证字段除数等）
+    func parseEastMoneyStockData(_ data: Data, symbol: String, marketCode: String) -> StockData? {
         do {
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let dataDict = json["data"] as? [String: Any] else {
@@ -409,30 +429,17 @@ class StockDataService {
             // f58: 名称
             let name = dataDict["f58"] as? String ?? ""
 
-            // f43: 价格（整数，需除以1000）
+            // f43: 当前价格（整数，需除以 100）。
+            // 实测验证（茅台116863→1168.63、招行3600→36.00、工行715→7.15）：除数是 100。
+            // ⚠️ 此前代码误用 /1000，导致所有股价被缩小到 1/10。
             let priceInt = dataDict["f43"] as? Int ?? 0
-            let currentPrice = Double(priceInt) / 1000.0
+            let currentPrice = Double(priceInt) / 100.0
 
-            // f162: 股息率（整数，需除以100）
-            let yieldInt = dataDict["f162"] as? Int ?? 0
-            let dividendYield = Double(yieldInt) / 100.0
-
-            // f173: 每股股息（单位是元）
-            // 注意：东财 push2 的 f173 仅对 A股/港股可靠地表示"年化每股股息"；
-            // 美股(secid 105.x)的 f173 口径不明（实测 AAPL 返回 79.54，远超真实年股息~$1），
-            // 且美股 f162(股息率)通常返回 0。因此美股不采用 f173，避免股息率计算严重失真。
-            let isUSStock = (marketCode != "1" && marketCode != "0")
-            let dividendPerShare: Double
-            let resolvedYield: Double
-            if isUSStock {
-                dividendPerShare = 0
-                resolvedYield = 0 // 美股股息由其它途径或保留已有值
-            } else {
-                dividendPerShare = dataDict["f173"] as? Double ?? 0
-                resolvedYield = dividendYield > 0 ? dividendYield
-                    : (dividendPerShare > 0 && currentPrice > 0 ? dividendPerShare / currentPrice : 0)
-            }
-
+            // 注意：东财 push2 的 f173(每股股息) 与 f162(股息率) 字段口径不稳定，
+            // 实测多只股票返回脏数据（如 f173 对茅台返回10.57、对宁沪高速返回3.22，均与真实值不符）。
+            // 因此 push2 仅用于获取可靠的实时价格；
+            // 每股股息改由 datacenter 分红明细接口（fetchTTMDividend）单独获取。
+            // 此处 latestDividend/dividendYield 留空，由调用方在拿到价格后补充。
             let market: String
             switch marketCode {
             case "1":
@@ -449,11 +456,11 @@ class StockDataService {
                 market: market,
                 marketCode: marketCode,
                 currentPrice: currentPrice,
-                latestDividend: dividendPerShare,
-                dividendYield: resolvedYield
+                latestDividend: 0,   // 股息由 fetchTTMDividend 补充
+                dividendYield: 0
             )
 
-            AppLogger.network.info("解析成功: \(name, privacy: .public) (\(symbol, privacy: .public)) 价格=\(currentPrice) 股息=\(dividendPerShare) 股息率=\(stockData.dividendYield)")
+            AppLogger.network.info("解析成功: \(name, privacy: .public) (\(symbol, privacy: .public)) 价格=\(currentPrice)")
 
             return stockData
         } catch {
@@ -501,6 +508,73 @@ class StockDataService {
             dividendYield: fallbackYield
         )
     }
+
+    // MARK: - 股息数据（datacenter 权威源）
+
+    /// 获取过去 12 个月（TTM）每股股息合计。
+    /// 数据源：东方财富 datacenter 分红明细接口（RPT_SHAREBONUS_DET），
+    /// 取近 365 天内已实施的分红记录，将 PRETAX_BONUS_RMB（每10股派息，元）求和后 ÷10。
+    /// - Note: 仅 A 股代码可靠。港股/美股 datacenter 数据不完整，返回 0（沿用已有值）。
+    func fetchTTMDividend(symbol: String, marketCode: String, completion: @escaping (Double) -> Void) {
+        // 港股/美股暂不通过此接口获取（数据不完整）
+        guard marketCode == "1" || marketCode == "0" else {
+            completion(0)
+            return
+        }
+
+        let querySymbol = marketCode == "0" ? symbol : symbol  // datacenter 用纯代码
+        let urlStr = "\(eastMoneyDividendDataURL)?sortColumns=EQUITY_RECORD_DATE&sortTypes=-1&pageSize=10&pageNumber=1&reportName=RPT_SHAREBONUS_DET&filter=(SECURITY_CODE=%22\(querySymbol)%22)&columns=ALL"
+
+        guard let url = URL(string: urlStr) else {
+            completion(0)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.addValue("https://data.eastmoney.com/", forHTTPHeaderField: "Referer")
+
+        session.dataTask(with: request) { data, _, error in
+            guard error == nil, let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let result = json["result"] as? [String: Any],
+                  let rows = result["data"] as? [[String: Any]] else {
+                AppLogger.data.warning("TTM股息获取失败: \(symbol, privacy: .public)")
+                completion(0)
+                return
+            }
+
+            let calendar = Calendar.current
+            let cutoff = calendar.date(byAdding: .day, value: -365, to: Date()) ?? Date()
+            var total: Double = 0
+
+            for row in rows {
+                // 仅统计"已实施"的分配
+                let progress = row["ASSIGN_PROGRESS"] as? String ?? ""
+                guard progress.contains("实施") else { continue }
+
+                // 股权登记日
+                guard let dateStr = row["EQUITY_RECORD_DATE"] as? String else { continue }
+                let recordDate = self.dataCenterDateFormatter.date(from: String(dateStr.prefix(10))) ?? Date.distantPast
+                guard recordDate >= cutoff else { continue }
+
+                // PRETAX_BONUS_RMB：每10股派息(税前，元)；转成每股
+                let per10 = row["PRETAX_BONUS_RMB"] as? Double ?? 0
+                total += per10 / 10.0
+            }
+
+            AppLogger.data.info("TTM股息: \(symbol, privacy: .public) = \(total)")
+            completion(total)
+        }.resume()
+    }
+
+    private lazy var dataCenterDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        return f
+    }()
 }
 
 // MARK: - 异步版本（iOS 15+）
